@@ -59,4 +59,40 @@ describe('video timeline', () => {
     expect(pairs).toHaveLength(2);
     expect(pairs.find(([p]) => p.x === 0)?.[1].x).toBe(30);
   });
+
+  it('gives each face one cover, not a pile of covers', () => {
+    const at = (t: number, x0: number) => ({ x: x0 + 100 * t, y: 100, w: 50, h: 50, shape: 'ellipse' as const });
+    const samples: TimedBoxes[] = [0, 1 / 3, 2 / 3, 1].map((t) => ({ t, boxes: [at(t, 100), at(t, 600)] }));
+    for (const t of [0, 0.2, 0.5, 0.9]) {
+      const m = masksAt(samples, t, 1000, 1000);
+      expect(m).toHaveLength(2);
+      expect(m.every((c) => c.shape === 'ellipse')).toBe(true);
+      // Tight: a slow face's cover is only a little bigger than the face.
+      expect(m[0]!.w).toBeLessThan(50 * 1.6);
+    }
+  });
+
+  it('keeps a fast face covered when two samples in a row miss it', () => {
+    const at = (t: number) => ({ x: 100 + 400 * t, y: 300, w: 60, h: 60 });
+    const samples: TimedBoxes[] = [
+      { t: 0, boxes: [at(0)] },
+      { t: 1 / 3, boxes: [at(1 / 3)] },
+      { t: 2 / 3, boxes: [] },
+      { t: 1, boxes: [] },
+      { t: 4 / 3, boxes: [at(4 / 3)] },
+      { t: 5 / 3, boxes: [at(5 / 3)] },
+    ];
+    for (let t = 0; t <= 5 / 3; t += 0.02) {
+      expect(covered(at(t), masksAt(samples, t, 2000, 1000)), `at ${t.toFixed(2)}s`).toBe(true);
+    }
+  });
+
+  it('keeps faces of different shapes in separate tracks', () => {
+    const samples: TimedBoxes[] = [
+      { t: 0, boxes: [{ x: 100, y: 100, w: 50, h: 50, shape: 'ellipse' }, { x: 110, y: 110, w: 60, h: 20, shape: 'rounded' }] },
+      { t: 1 / 3, boxes: [{ x: 105, y: 100, w: 50, h: 50, shape: 'ellipse' }, { x: 112, y: 110, w: 60, h: 20, shape: 'rounded' }] },
+    ];
+    const m = masksAt(samples, 0.15, 1000, 1000);
+    expect(m.map((c) => c.shape).sort()).toEqual(['ellipse', 'rounded']);
+  });
 });

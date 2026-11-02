@@ -16,7 +16,7 @@ import { sourceFromBlob } from './bytes';
 import { assertSaneMovie, inspectVideo } from './bmff';
 import { finishVideo, soundConversion, type CleanVideoResult } from './clean-video';
 import type { Detector } from './detect/detector';
-import { paintCovers, type MaskStyle } from './masks';
+import { paintCovers, sampleColors, type MaskStyle } from './masks';
 import { masksAt, sampleTimes, type TimedBoxes } from './video-timeline';
 import { VideoCleanError } from './video-errors';
 
@@ -111,7 +111,14 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       } catch (e) {
         throw new VideoCleanError('cannotMask', `detection failed: ${e instanceof Error ? e.message : String(e)}`);
       }
-      const boxes = found.map((d) => ({ x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale, shape: d.kind === 'face' ? ('ellipse' as const) : ('rounded' as const) }));
+      // Smart-style colours are sampled once here, from the detection frame, not on every output frame.
+      const fctx = (wrapped.canvas as HTMLCanvasElement | OffscreenCanvas).getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      const colors = fctx && (opts.style ?? 'smart') === 'smart' ? sampleColors(fctx, found, 1, cw, ch) : [];
+      const boxes = found.map((d, k) => {
+        const b: TimedBoxes['boxes'][number] = { x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale, shape: d.kind === 'face' ? 'ellipse' : 'rounded' };
+        if (colors[k]) b.color = colors[k];
+        return b;
+      });
       if (boxes.length) framesWithMasks++;
       maxObjects = Math.max(maxObjects, boxes.length);
       timeline.push({ t: wrapped.timestamp ?? t, boxes });

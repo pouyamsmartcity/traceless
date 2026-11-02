@@ -266,8 +266,9 @@ export class Detector {
           const tensor = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels);
           const boxes = await this.infer(pass.model, tensor, spec.size, spec.size);
           for (const b of boxes) found.push({ model: pass.model, box: unletterbox(b, lb), score: b.score });
-          // Photos: faces are also looked for in the mirrored picture (+5% of small faces on our crowd set).
-          if (pass.model === 'face' && !opts.quick) {
+          // Faces are also looked for in the mirrored picture (+5% of small faces on our crowd set).
+          // Video frames: only for the whole-frame pass, to keep long videos quick.
+          if (pass.model === 'face' && (!opts.quick || pass.region === passes[0]?.region)) {
             const mirrored = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels, true);
             for (const b of await this.infer('face', mirrored, spec.size, spec.size)) {
               const unflipped = { x1: spec.size - b.x2, x2: spec.size - b.x1, y1: b.y1, y2: b.y2, score: b.score };

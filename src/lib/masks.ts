@@ -23,6 +23,8 @@ export interface Silhouette {
 export interface Cover extends Rect {
   shape: MaskShape;
   silhouette?: Silhouette;
+  /** Colour for the smart style, when it was sampled earlier (videos sample it once per detection). */
+  color?: [number, number, number];
 }
 
 const BRAND = '#126354';
@@ -57,39 +59,36 @@ function path(ctx: Ctx, c: Cover, s: number): void {
   }
 }
 
-/** Average colour of a thin ring just outside the cover's box (in canvas pixels). */
-function ringColor(ctx: Ctx, c: Cover, s: number, cw: number, ch: number): [number, number, number] {
+/** Average colour of a thin ring just outside the cover's box, from the pixels of a w x h canvas. */
+function ringColorFrom(d: Uint8ClampedArray, cw: number, ch: number, c: Rect, s: number): [number, number, number] {
   const pad = Math.max(2, Math.round(Math.min(c.w, c.h) * s * 0.08));
   const x0 = Math.max(0, Math.floor(c.x * s) - pad);
   const y0 = Math.max(0, Math.floor(c.y * s) - pad);
   const x1 = Math.min(cw, Math.ceil((c.x + c.w) * s) + pad);
   const y1 = Math.min(ch, Math.ceil((c.y + c.h) * s) + pad);
   if (x1 <= x0 || y1 <= y0) return [40, 40, 40];
-  const d = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
-  const w = x1 - x0;
-  const h = y1 - y0;
   let r = 0;
   let g = 0;
   let b = 0;
   let n = 0;
-  const step = Math.max(1, Math.floor((w + h) / 200));
+  const step = Math.max(1, Math.floor((x1 - x0 + y1 - y0) / 200));
   const add = (x: number, y: number) => {
-    const i = (y * w + x) * 4;
+    const i = (y * cw + x) * 4;
     r += d[i]!;
     g += d[i + 1]!;
     b += d[i + 2]!;
     n++;
   };
-  for (let x = 0; x < w; x += step) {
-    for (let k = 0; k < pad && k < h; k++) {
-      add(x, k);
-      add(x, h - 1 - k);
+  for (let x = x0; x < x1; x += step) {
+    for (let k = 0; k < pad && y0 + k < y1; k++) {
+      add(x, y0 + k);
+      add(x, y1 - 1 - k);
     }
   }
-  for (let y = 0; y < h; y += step) {
-    for (let k = 0; k < pad && k < w; k++) {
-      add(k, y);
-      add(w - 1 - k, y);
+  for (let y = y0; y < y1; y += step) {
+    for (let k = 0; k < pad && x0 + k < x1; k++) {
+      add(x0 + k, y);
+      add(x1 - 1 - k, y);
     }
   }
   if (!n) return [40, 40, 40];
@@ -97,6 +96,16 @@ function ringColor(ctx: Ctx, c: Cover, s: number, cw: number, ch: number): [numb
   const avg = [r / n, g / n, b / n];
   const grey = (avg[0]! + avg[1]! + avg[2]!) / 3;
   return avg.map((v) => Math.round((v * 0.75 + grey * 0.25) * 0.82)) as [number, number, number];
+}
+
+/**
+ * Smart-style colours for many covers with a single read of the canvas (reading pixels is slow on phones).
+ * `scale` maps cover coordinates to canvas pixels.
+ */
+export function sampleColors(ctx: Ctx, covers: Rect[], scale: number, cw: number, ch: number): [number, number, number][] {
+  if (!covers.length) return [];
+  const d = ctx.getImageData(0, 0, cw, ch).data;
+  return covers.map((c) => ringColorFrom(d, cw, ch, c, scale));
 }
 
 function silhouetteCanvas(c: Cover, s: number): OffscreenCanvas | HTMLCanvasElement | undefined {
@@ -154,32 +163,77 @@ function eraserMark(ctx: Ctx, c: Cover, s: number): void {
  * Colours for the "smart" style are all sampled first, from the untouched picture.
  */
 export function paintCovers(ctx: Ctx, covers: Cover[], style: MaskStyle, scale: number, canvasW: number, canvasH: number): void {
-  const colours = covers.map((c) => (style === 'smart' ? ringColor(ctx, c, scale, canvasW, canvasH) : undefined));
-  covers.forEach((c, i) => {
-    const fill = style === 'black' ? '#000000' : style === 'brand' ? BRAND : `rgb(${colours[i]!.join(',')})`;
-    const sil = c.shape === 'silhouette' ? silhouetteCanvas(c, scale) : undefined;
+  if (!covers.length) return;
+  const missing = style === 'smart' ? covers.filter((c) => !c.color) : [];
+  const sampled = sampleColors(ctx, missing, scale, canvasW, canvasH);
+  const own = covers.map((c) => (style === 'smart' ? (c.color ?? sampled[missing.indexOf(c)]) : undefined));
+  // Overlapping covers (a crowd, or one face held across video frames) share one colour, so they read
+  // as a single clean patch: the colour of the largest cover in each group.
+  const group = groupsOf(covers);
+  const colourOf = (i: number) => {
+    const g = group[i]!;
+    let best = i;
+    for (let j = 0; j < covers.length; j++) if (group[j] === g && covers[j]!.w * covers[j]!.h > covers[best]!.w * covers[best]!.h) best = j;
+    return own[best];
+  };
+  const fills = covers.map((_, i) => (style === 'black' ? '#000000' : style === 'brand' ? BRAND : `rgb(${colourOf(i)!.join(',')})`));
+  const shaped = covers.map((c) => (c.shape === 'silhouette' && !c.silhouette ? { ...c, shape: 'rounded' as const } : c));
+
+  // Smart style: edges first, then all fills on top, so only the outer edge of a group stays visible.
+  if (style === 'smart') {
     ctx.save();
+    ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+    shaped.forEach((c) => {
+      if (c.shape === 'silhouette') return;
+      ctx.lineWidth = Math.max(1.5, Math.min(c.w, c.h) * scale * 0.03) * 2;
+      path(ctx, c, scale);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+  shaped.forEach((c, i) => {
+    ctx.save();
+    const sil = c.shape === 'silhouette' ? silhouetteCanvas(c, scale) : undefined;
     if (sil) {
       // Colour the silhouette, then lay it over the picture.
       const sctx = sil.getContext('2d') as Ctx;
       sctx.globalCompositeOperation = 'source-in';
-      sctx.fillStyle = fill;
+      sctx.fillStyle = fills[i]!;
       sctx.fillRect(0, 0, sil.width, sil.height);
       ctx.drawImage(sil, Math.round(c.x * scale), Math.round(c.y * scale));
     } else {
-      path(ctx, c.shape === 'silhouette' ? { ...c, shape: 'rounded' } : c, scale);
-      ctx.fillStyle = fill;
+      path(ctx, c, scale);
+      ctx.fillStyle = fills[i]!;
       ctx.fill();
-      if (style === 'smart') {
-        // A thin, slightly darker edge so the cover is clearly a cover.
-        ctx.lineWidth = Math.max(1.5, Math.min(c.w, c.h) * scale * 0.03);
-        ctx.strokeStyle = 'rgba(0,0,0,0.28)';
-        ctx.stroke();
-      }
     }
-    if (style === 'brand') eraserMark(ctx, c, scale);
     ctx.restore();
   });
+  if (style === 'brand') {
+    // One mark per group, on its largest cover.
+    const marked = new Set<number>();
+    shaped.forEach((c, i) => {
+      const g = group[i]!;
+      if (marked.has(g)) return;
+      let best = i;
+      for (let j = 0; j < shaped.length; j++) if (group[j] === g && shaped[j]!.w * shaped[j]!.h > shaped[best]!.w * shaped[best]!.h) best = j;
+      marked.add(g);
+      eraserMark(ctx, shaped[best]!, scale);
+    });
+  }
+}
+
+/** Groups covers whose boxes overlap (union-find); returns a group id per cover. */
+export function groupsOf(covers: Rect[]): number[] {
+  const parent = covers.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i]!)));
+  for (let i = 0; i < covers.length; i++) {
+    for (let j = i + 1; j < covers.length; j++) {
+      const a = covers[i]!;
+      const b = covers[j]!;
+      if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) parent[find(i)] = find(j);
+    }
+  }
+  return covers.map((_, i) => find(i));
 }
 
 /** True when point (x, y) lies inside the cover's shape (used to tap covers in the editor). */
