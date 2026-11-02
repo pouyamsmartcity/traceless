@@ -50,6 +50,8 @@ export interface Item {
   skipVideoMasks?: boolean;
   /** Video: the options its safe copy was made with. */
   videoMadeWith?: VideoOptions;
+  /** Fingerprint of the original, once it was sealed. */
+  sealedSha256?: string;
   /** Video: the user's choice after a voice change was not possible on this device. */
   soundOverride?: 'mute' | 'keep';
   error?: ErrorKind;

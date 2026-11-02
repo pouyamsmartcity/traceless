@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { sourceFromBytes } from '../src/lib/bytes';
@@ -365,6 +366,41 @@ test.describe('Pakkon', () => {
     item = await readyItem(page);
     await expect(item.getByTestId('findings')).toBeVisible();
     await expect(item.getByTestId('hints')).toHaveCount(0);
+  });
+
+  test('seals the original with a passphrase, and opens it again to prove it is unchanged', async ({ page }) => {
+    await page.goto('/');
+    await addFile(page, fixture('leaky/photo-everything.jpg'));
+    const item = await readyItem(page);
+    await item.getByTestId('seal').click();
+    await page.getByTestId('passphrase').fill('correct horse battery');
+    await page.getByTestId('passphrase-confirm').fill('correct horse batteri');
+    await page.getByTestId('passphrase-ok').click();
+    await expect(page.locator('.sheet .error')).not.toBeEmpty();
+    await page.getByTestId('passphrase-confirm').fill('correct horse battery');
+    const download = page.waitForEvent('download');
+    await page.getByTestId('passphrase-ok').click();
+    const file = await download;
+    expect(file.suggestedFilename()).toMatch(/^sealed-[a-z0-9]{6}\.pakkon$/);
+    const sealedPath = await file.path();
+    const expected = createHash('sha256').update(readFileSync(fixture('leaky/photo-everything.jpg'))).digest('hex');
+    await expect(item.getByTestId('sealed-note')).toContainText(expected);
+    // The sealed file reveals nothing readable.
+    const sealedBytes = readFileSync(sealedPath!);
+    expect(sealedBytes.toString('latin1')).not.toContain('FakePhone');
+
+    // Open it with a wrong passphrase, then the right one.
+    await page.getByTestId('file-input').setInputFiles({ name: 'evidence.pakkon', mimeType: 'application/octet-stream', buffer: sealedBytes });
+    await page.getByTestId('passphrase').fill('not the passphrase');
+    await page.getByTestId('passphrase-ok').click();
+    await expect(page.getByTestId('sealed-card').first()).toContainText('رمز اشتباه');
+    await page.getByTestId('file-input').setInputFiles({ name: 'evidence.pakkon', mimeType: 'application/octet-stream', buffer: sealedBytes });
+    await page.getByTestId('passphrase').fill('correct horse battery');
+    await page.getByTestId('passphrase-ok').click();
+    const card = page.getByTestId('sealed-card').first();
+    await expect(card).toContainText('دست نخورده');
+    await expect(card).toContainText(expected);
+    await expect(card).toContainText('photo-everything.jpg');
   });
 
   test('a cover can be drawn by hand', async ({ page }) => {

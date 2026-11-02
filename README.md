@@ -19,6 +19,9 @@ which device a picture was taken, and covers faces and licence plates with solid
   pattern (smaller, very slightly turned and trimmed picture, fresh grain).
 - **Change voices or remove the sound** in videos on request (voices and background sounds can identify people
   and places). Voices are made deeper by a random factor; words and accents stay.
+- **Seal the original** (optional): lock the untouched original with a passphrase and record its fingerprint, to
+  prove one day that a shared photo is real, without ever sharing the original. Open a `.pakkon` file in Pakkon to
+  check it.
 - **Take photos inside Pakkon** on phones, so the original never lands in the gallery.
 - **Warnings and hints:** "this photo may show where it was taken" when signs, writing or plates stay uncovered;
   "at least N people are visible" for crowds; and for photos you receive, signs of editing (editor name, changed

@@ -15,6 +15,7 @@ This page says plainly what it protects against, how that is checked, and where 
 | Faces, licence plates, text in the picture | On-device detection; solid fills (blur can be reversed); tap to add or remove covers | Tested on a public-domain portrait, an Iranian plate and street signs; crowd recall measured on WIDER FACE |
 | Moving faces in videos | Frames sampled three times a second; masks follow matched faces and are held across one missed detection | Tested on panning videos, a rotated video and a late-starting MPEG-TS file |
 | Voices in videos | Optional voice change (pitch and formants lowered by a random factor) or sound removal | Pitch measured in the output in a browser test; if the browser cannot encode audio, the user chooses instead of a silent fallback |
+| Needing to prove later that a shared photo is real | Optional sealed original: the untouched file, encrypted with a passphrase (PBKDF2-SHA-256, 600,000 rounds; AES-256-GCM) with its SHA-256 fingerprint; the app never stores it | Unit and browser tests: round trip, wrong passphrase, changed file, nothing readable in the sealed file |
 | Camera sensor fingerprint (PRNU) | Optional: smaller, slightly turned and trimmed picture with fresh grain | Makes matching much harder; **not** a guarantee |
 | File names that reveal date/time | Output names are random | — |
 | Covering silently failing | If detection or video covering fails, nothing is offered until the user covers by hand or explicitly continues | Browser tests block the models and check that no copy is offered |

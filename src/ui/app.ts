@@ -3,6 +3,7 @@ import type { Finding } from '../lib/findings';
 import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon } from './dom';
 import { openEditor } from './editor';
+import { looksSealed, openSealed, sealOriginal } from './seal-ui';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
 import { ensureText, locationRisks, lookForText, newItem, processItem, renderImage, sameOptions, sameVideoOptions, type Item, type Options } from './pipeline';
 
@@ -91,6 +92,11 @@ export class App {
   /** Adds files from the picker, drag and drop, paste or the system share sheet. */
   addFiles(files: Iterable<File>): void {
     for (const file of files) {
+      // A sealed original (.pakkon) is opened, not cleaned.
+      if (/\.pakkon$/i.test(file.name)) {
+        void this.openSealedFile(file);
+        continue;
+      }
       const item = newItem(file);
       this.items.unshift(item);
       this.listEl.prepend(this.cardFor(item));
@@ -98,6 +104,34 @@ export class App {
       this.enqueue(item);
     }
     this.updateBulk();
+  }
+
+  private async openSealedFile(file: File): Promise<void> {
+    const t = this.t;
+    if (!(await looksSealed(file))) return;
+    const r = await openSealed(file, t);
+    if (!r.ok && r.reason === 'cancelled') return;
+    const card = h('article', { className: 'card sealed-card', 'data-testid': 'sealed-card' });
+    const body = h('div', { className: 'card-body' });
+    card.appendChild(body);
+    if (!r.ok) {
+      body.appendChild(h('p', { className: 'error', role: 'alert' }, r.reason === 'wrongPassphrase' ? t.errWrongPass : t.errSealDamaged));
+    } else {
+      body.appendChild(h('p', { className: 'status ready' }, icon(ICONS.check, 18), t.openedTitle));
+      const row = (k: string, v: string) => h('li', {}, h('span', { className: 'label' }, k), h('span', { className: 'value', dir: 'ltr' }, v));
+      body.appendChild(
+        h('ul', { className: 'facts' }, row(t.openedName, r.header.name), row(t.openedWhen, r.header.sealedAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC')), row(t.openedFingerprint, r.header.sha256)),
+      );
+      const url = URL.createObjectURL(r.original);
+      const save = h('a', { className: 'btn', href: url, download: r.original.name, 'data-testid': 'save-original' }, icon(ICONS.save), t.saveOriginal);
+      const safe = h('button', { type: 'button', className: 'btn primary' }, t.makeSafeFromOriginal);
+      safe.addEventListener('click', () => this.addFiles([r.original]));
+      body.appendChild(h('div', { className: 'actions' }, safe, save));
+    }
+    const rm = h('button', { type: 'button', className: 'link' }, t.remove);
+    rm.addEventListener('click', () => card.remove());
+    body.appendChild(rm);
+    this.listEl.prepend(card);
   }
 
   private enqueue(item: Item): void {
@@ -121,7 +155,7 @@ export class App {
 
     const input = h('input', {
       type: 'file',
-      accept: 'image/*,video/*',
+      accept: 'image/*,video/*,.pakkon',
       multiple: true,
       className: 'visually-hidden',
       'data-testid': 'file-input',
@@ -440,6 +474,9 @@ export class App {
       else body.appendChild(this.actions(item));
     }
 
+    if (item.sealedSha256) {
+      body.appendChild(h('p', { className: 'note', 'data-testid': 'sealed-note' }, t.sealedDone, ' ', h('code', { dir: 'ltr', className: 'hash' }, item.sealedSha256)));
+    }
     if (item.findings.length || item.status === 'ready') body.appendChild(this.findingsView(item));
     if (item.status === 'ready') {
       body.appendChild(
@@ -487,6 +524,19 @@ export class App {
     }
     const save = h('a', { className: 'btn', href: out.url, download: out.name, 'data-testid': 'save' }, icon(ICONS.save), t.save);
     row.appendChild(save);
+    const sealBtn = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'seal' }, icon(ICONS.lock), t.sealOriginal);
+    sealBtn.addEventListener('click', async () => {
+      if (item.file.size > 1024 ** 3) {
+        alert(t.errSealTooLarge);
+        return;
+      }
+      const r = await sealOriginal(item.file, t);
+      if (!r) return;
+      item.sealedSha256 = r.header.sha256;
+      this.updateCard(item);
+      await shareOrSave([r.file], true);
+    });
+    row.appendChild(sealBtn);
     if (item.media === 'image' && item.decoded) {
       const edit = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'edit' }, icon(ICONS.edit), t.editMasks);
       edit.addEventListener('click', async () => {
@@ -608,8 +658,10 @@ function canShareFiles(files: File[]): boolean {
   }
 }
 
-async function shareOrSave(files: File[]): Promise<void> {
+async function shareOrSave(files: File[], saveOnly = false): Promise<void> {
   try {
+    // A sealed original is saved, never offered to share to other apps by default.
+    if (saveOnly) throw new DOMException('save', 'NotAllowedError');
     await navigator.share({ files });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return; // the user closed the share sheet
