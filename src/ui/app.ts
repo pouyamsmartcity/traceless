@@ -190,8 +190,20 @@ export class App {
       h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
       touch ? h('label', { className: 'pick-btn secondary', 'data-testid': 'camera-button' }, camera, icon(ICONS.camera, 24), h('span', {}, t.takePhoto)) : null,
       touch ? h('p', { className: 'hint small' }, t.takePhotoHint) : h('p', { className: 'hint' }, t.pickHint),
-      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('text', t.optText), toggle('voice', t.optVoice), toggle('mute', t.optMute), toggle('extra', t.optExtra)),
-      h('p', { className: 'hint small' }, t.extraHint),
+      h(
+        'div',
+        { className: 'options' },
+        h('p', { className: 'group' }, t.groupCover),
+        toggle('faces', t.optFaces),
+        toggle('plates', t.optPlates),
+        toggle('text', t.optText),
+        h('p', { className: 'group' }, t.groupSound),
+        toggle('voice', t.optVoice),
+        toggle('mute', t.optMute),
+        h('p', { className: 'group' }, t.groupMore),
+        toggle('extra', t.optExtra),
+        h('p', { className: 'hint small' }, t.extraHint),
+      ),
     );
     this.bindDrop(dropZone);
 
