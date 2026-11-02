@@ -11,7 +11,7 @@ interface Settings extends Options {
 }
 
 function loadSettings(): Settings {
-  const defaults: Settings = { lang: 'fa', faces: true, plates: true };
+  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false };
   try {
     const raw = localStorage.getItem('pakkon-settings');
     if (raw) {
@@ -20,6 +20,7 @@ function loadSettings(): Settings {
         lang: s.lang === 'en' ? 'en' : 'fa',
         faces: s.faces !== false,
         plates: s.plates !== false,
+        extra: s.extra === true,
       };
     }
   } catch {
@@ -115,7 +116,7 @@ export class App {
       input.value = '';
     });
 
-    const toggle = (key: 'faces' | 'plates', label: string) => {
+    const toggle = (key: 'faces' | 'plates' | 'extra', label: string) => {
       const box = h('input', { type: 'checkbox', checked: this.settings[key], 'data-testid': `opt-${key}` });
       box.addEventListener('change', () => {
         this.settings[key] = box.checked;
@@ -158,7 +159,8 @@ export class App {
       { className: 'picker' },
       h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
       h('p', { className: 'hint' }, t.pickHint),
-      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates)),
+      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('extra', t.optExtra)),
+      h('p', { className: 'hint' }, t.extraHint),
     );
     this.bindDrop(dropZone);
 
@@ -304,6 +306,7 @@ export class App {
         const plates = item.detections.filter((d, i) => d.kind === 'plate' && this.settings.plates && !item.removed.has(i)).length;
         body.appendChild(h('p', { className: 'masks', 'data-testid': 'mask-summary' }, t.masksSummary(faces, plates, item.manual.length)));
         if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
+        if (this.settings.extra) body.appendChild(h('p', { className: 'note', 'data-testid': 'extra-note' }, t.extraApplied));
         body.appendChild(h('p', { className: 'note' }, t.checkPicture));
       } else {
         const videoNote = { covered: t.videoCovered, off: t.videoMasksOff, unavailable: t.videoMasksUnavailable }[item.videoMasks ?? 'off'];

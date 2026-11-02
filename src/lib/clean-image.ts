@@ -67,17 +67,76 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: OutputType): Promise<Blob
   });
 }
 
+/** Longest side of a photo made with extra protection. */
+export const EXTRA_MAX_SIDE = 1600;
+
+export interface ExtraTransform {
+  outW: number;
+  outH: number;
+  /** Rotation in radians. */
+  angle: number;
+  /** Scale applied to the source picture (after rotation) so it covers the whole output. */
+  scale: number;
+}
+
+/**
+ * Plans the "extra protection" redraw: scale down, rotate very slightly and trim the edges a little.
+ * The camera sensor's faint noise pattern (which can link photos to one camera) is matched pixel by
+ * pixel, so shrinking, turning and cropping by unknown amounts makes matching much harder. Not impossible.
+ * `rand` returns numbers in [0, 1).
+ */
+export function planExtraTransform(w: number, h: number, rand: () => number): ExtraTransform {
+  const s0 = Math.min(1, EXTRA_MAX_SIDE / Math.max(w, h));
+  const crop = 0.02 + 0.02 * rand();
+  const outW = Math.max(1, Math.round(w * s0 * (1 - crop)));
+  const outH = Math.max(1, Math.round(h * s0 * (1 - crop)));
+  const degrees = (0.5 + rand()) * (rand() < 0.5 ? -1 : 1);
+  const angle = (degrees * Math.PI) / 180;
+  const c = Math.abs(Math.cos(angle));
+  const sn = Math.abs(Math.sin(angle));
+  // The rotated picture must cover the output rectangle completely (no empty corners).
+  const scale = Math.max((outW * c + outH * sn) / w, (outW * sn + outH * c) / h) * 1.001;
+  return { outW, outH, angle, scale };
+}
+
+function cryptoRand(): number {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0]! / 2 ** 32;
+}
+
+/** Adds faint random grain (+/-2 levels) so the original fine noise is not carried over unchanged. */
+function addGrain(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const noise = new Uint8Array(65536);
+  for (let o = 0; o < d.length; o += noise.length) {
+    crypto.getRandomValues(noise);
+    const n = Math.min(noise.length, d.length - o);
+    for (let i = 0; i < n; i++) {
+      if ((o + i) % 4 === 3) continue; // leave transparency alone
+      d[o + i] = d[o + i]! + ((noise[i]! % 5) - 2); // Uint8ClampedArray clamps to 0..255
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+export interface RenderOptions {
+  /** Weaken the camera sensor pattern (smaller, slightly turned and trimmed picture, fresh grain). */
+  extra?: boolean;
+}
+
 /**
  * Draws the picture from its pixels onto a fresh canvas, paints solid masks, encodes a new file,
  * removes anything but picture data from it, and checks the result independently.
  * `masks` are in the decoded image's pixels.
  */
-export async function renderClean(img: DecodedImage, masks: Rect[], type: OutputType): Promise<Uint8Array> {
+export async function renderClean(img: DecodedImage, masks: Rect[], type: OutputType, opts: RenderOptions = {}): Promise<Uint8Array> {
   const { width, height, scale } = outputSize(img.width, img.height);
-  const canvas = document.createElement('canvas');
+  let canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext('2d', { alpha: type === 'image/png' });
+  let ctx = canvas.getContext('2d', { alpha: type === 'image/png' });
   if (!ctx) throw new ImageCleanError('tooLarge', 'no drawing surface');
   if (type === 'image/jpeg') {
     // JPEG has no transparency: put a white background under transparent pixels.
@@ -86,6 +145,7 @@ export async function renderClean(img: DecodedImage, masks: Rect[], type: Output
   }
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img.element, 0, 0, width, height);
+  // Masks are painted before any further transformation, so they move with the picture.
   ctx.fillStyle = MASK_COLOR;
   for (const m of masks) {
     const x = Math.floor(m.x * scale);
@@ -95,6 +155,30 @@ export async function renderClean(img: DecodedImage, masks: Rect[], type: Output
   // A canvas that was too big for the device comes back empty; check one masked/unmasked pixel exists.
   const probe = ctx.getImageData(0, 0, 1, 1).data;
   if (probe.length !== 4) throw new ImageCleanError('tooLarge', 'drawing surface failed');
+
+  if (opts.extra) {
+    const plan = planExtraTransform(width, height, cryptoRand);
+    const out = document.createElement('canvas');
+    out.width = plan.outW;
+    out.height = plan.outH;
+    const octx = out.getContext('2d', { alpha: type === 'image/png' });
+    if (!octx) throw new ImageCleanError('tooLarge', 'no drawing surface');
+    if (type === 'image/jpeg') {
+      octx.fillStyle = '#ffffff';
+      octx.fillRect(0, 0, plan.outW, plan.outH);
+    }
+    octx.imageSmoothingQuality = 'high';
+    octx.translate(plan.outW / 2, plan.outH / 2);
+    octx.rotate(plan.angle);
+    octx.scale(plan.scale, plan.scale);
+    octx.drawImage(canvas, -width / 2, -height / 2);
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    addGrain(octx, plan.outW, plan.outH);
+    canvas.width = 0;
+    canvas.height = 0;
+    canvas = out;
+    ctx = octx;
+  }
 
   const encoded = new Uint8Array(await (await canvasToBlob(canvas, type)).arrayBuffer());
   canvas.width = 0; // free memory early on phones

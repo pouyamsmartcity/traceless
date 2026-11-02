@@ -39,6 +39,8 @@ export interface Item {
 export interface Options {
   faces: boolean;
   plates: boolean;
+  /** Weaken the camera sensor pattern in photos. */
+  extra: boolean;
 }
 
 let nextId = 1;
@@ -98,7 +100,7 @@ function setOutput(item: Item, blob: Blob, ext: string): void {
 /** Builds (or rebuilds after editing) the safe copy of an image whose detections are known. */
 export async function renderImage(item: Item, opts: Options): Promise<void> {
   if (!item.decoded || !item.outputType) throw new Error('image not decoded');
-  const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType);
+  const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra });
   const type = item.outputType;
   const ext = type === 'image/png' ? 'png' : 'jpg';
   // Keep the same random name on re-render so a user does not get confused by changing names.

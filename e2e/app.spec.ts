@@ -195,6 +195,23 @@ test.describe('Pakkon', () => {
     expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).max).toBeLessThan(8);
   });
 
+  test('extra protection makes a smaller, slightly turned copy and still covers the face', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-extra').check();
+    await addFile(page, fixture('real/astronaut.png'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('extra-note')).toBeVisible();
+    const out = await outputBytes(page);
+    expect(await imageLeftovers(out.bytes, 'image/png')).toEqual([]);
+    const face = await regionColor(page, { x: 205, y: 95, w: 40, h: 50 });
+    expect(face.width).toBeLessThan(512);
+    expect(face.width).toBeGreaterThan(480);
+    expect(face.max).toBeLessThan(12);
+    // Corners hold picture, not empty background.
+    const corner = await regionColor(page, { x: 0, y: 0, w: 4, h: 4 });
+    expect(corner.max).toBeGreaterThan(20);
+  });
+
   test('a cover can be drawn by hand', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('leaky/screenshot-leaky.png'));
