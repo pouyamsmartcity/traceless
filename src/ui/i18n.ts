@@ -15,6 +15,7 @@ const fa = {
   optFaces: 'پوشاندن صورت‌ها',
   optPlates: 'پوشاندن پلاک ماشین‌ها',
   optText: 'پوشاندن نوشته‌ها (تابلو، اسم، شماره)',
+  optPeople: 'پوشاندن کامل آدم‌ها (بدن، لباس، مو)',
   optVoice: 'تغییر صدای آدم‌ها (بم‌تر؛ برای شنوندهٔ معمولی)',
   optMute: 'حذف کامل صدا',
   optExtra: 'محافظت بیشتر در برابر شناختن دوربین',
@@ -35,14 +36,15 @@ const fa = {
   revealedNone: 'اطلاعات پنهانی پیدا نشد. باز هم نسخهٔ تازه ساخته شد.',
   removedNote: 'همهٔ این‌ها در نسخهٔ امن پاک شده است.',
   partialNote: 'بخشی از فایل خوانده نشد؛ نسخهٔ امن از صفر ساخته شده و چیزی از فایل اصلی در آن نیست.',
-  masksSummary: (faces: number, plates: number, manual: number, texts?: number) =>
+  masksSummary: (faces: number, plates: number, manual: number, texts?: number, people?: number) =>
     `${toFaDigits(faces)} صورت و ${toFaDigits(plates)} پلاک` +
     (texts !== undefined ? ` و ${toFaDigits(texts)} نوشته` : '') +
+    (people !== undefined ? ` و ${toFaDigits(people)} آدم` : '') +
     ' پوشانده شد' +
     (manual ? ` (+${toFaDigits(manual)} دستی)` : ''),
   checkPicture: 'لطفاً عکس را خوب نگاه کنید: اگر صورت یا پلاکی جا مانده، «ویرایش پوشش‌ها» را بزنید. پوششی را که لازم نیست، همان‌جا با یک ضربه بردارید.',
   videoCovered: (what: string) => `در همهٔ فریم‌های ویدیو پوشانده شد: ${what}. لطفاً ویدیو را تا آخر نگاه کنید؛ اگر چیزی جا مانده، آن را نفرستید.`,
-  kindNames: { faces: 'صورت‌ها', plates: 'پلاک‌ها', text: 'نوشته‌ها' },
+  kindNames: { faces: 'صورت‌ها', plates: 'پلاک‌ها', text: 'نوشته‌ها', people: 'کل آدم‌ها' },
   listJoin: '، ',
   videoUncovered: (what: string) => `پوشانده نشد (خاموش بود): ${what}.`,
   videoMasksOff: 'پوشاندن صورت و پلاک خاموش بود؛ فقط اطلاعات پنهان پاک شد.',
@@ -191,6 +193,7 @@ const en: Strings = {
   optFaces: 'Cover faces',
   optPlates: 'Cover licence plates',
   optText: 'Cover text (signs, names, numbers)',
+  optPeople: 'Cover whole people (body, clothes, hair)',
   optVoice: 'Change voices (deeper; against casual listeners)',
   optMute: 'Remove the sound entirely',
   optExtra: 'Extra protection against camera identification',
@@ -211,14 +214,15 @@ const en: Strings = {
   revealedNone: 'No hidden data found. A fresh copy was made anyway.',
   removedNote: 'All of this is gone from the safe copy.',
   partialNote: 'Part of the file could not be read; the safe copy is built from scratch and holds nothing of the original file.',
-  masksSummary: (faces, plates, manual, texts) =>
+  masksSummary: (faces, plates, manual, texts, people) =>
     `${faces} face${faces === 1 ? '' : 's'}, ${plates} plate${plates === 1 ? '' : 's'}` +
-    (texts !== undefined ? ` and ${texts} text${texts === 1 ? '' : 's'}` : '') +
+    (texts !== undefined ? `, ${texts} text${texts === 1 ? '' : 's'}` : '') +
+    (people !== undefined ? `, ${people} ${people === 1 ? 'person' : 'people'}` : '') +
     ' covered' +
     (manual ? ` (+${manual} by hand)` : ''),
   checkPicture: 'Please look at the picture: if a face or plate was missed, tap “Edit covers”. Remove a cover you do not need there with one tap.',
   videoCovered: (what) => `Covered in every frame: ${what}. Please watch the whole video; if anything was missed, do not send it.`,
-  kindNames: { faces: 'faces', plates: 'licence plates', text: 'text' },
+  kindNames: { faces: 'faces', plates: 'licence plates', text: 'text', people: 'whole people' },
   listJoin: ', ',
   videoUncovered: (what) => `Not covered (switched off): ${what}.`,
   videoMasksOff: 'Covering faces and plates was switched off; only hidden data was removed.',

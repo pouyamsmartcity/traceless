@@ -425,6 +425,20 @@ test.describe('Pakkon', () => {
     expect((await regionColor(page, { x: 100, y: 320, w: 200, h: 60 })).max).toBeGreaterThan(200);
   });
 
+  test('covers whole people when asked (body, clothes, hair)', async ({ page }) => {
+    await page.goto('/');
+    await addFile(page, fixture('real/astronaut.png'));
+    const item = await readyItem(page);
+    // Body visible before; reference person box x 11-368, y 20-507.
+    expect((await regionColor(page, { x: 200, y: 380, w: 60, h: 60 })).max).toBeGreaterThan(60);
+    await page.getByTestId('opt-people').check();
+    await readyItem(page);
+    await expect(item.getByTestId('mask-summary')).toContainText('آدم');
+    expect((await regionColor(page, { x: 200, y: 380, w: 60, h: 60 })).max).toBeLessThan(8);
+    // The background beside the person stays.
+    expect((await regionColor(page, { x: 440, y: 60, w: 40, h: 40 })).max).toBeGreaterThan(60);
+  });
+
   test('a cover can be drawn by hand', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('leaky/screenshot-leaky.png'));
@@ -587,6 +601,18 @@ test.describe('Pakkon', () => {
     await expect(item.getByTestId('video-uncovered')).toHaveCount(0);
     await expect(item.getByTestId('rebuild')).toHaveCount(0);
     expect((await videoRegion(page, 0.1, { x: 204, y: 98, w: 40, h: 40 })).max).toBeLessThan(40);
+  });
+
+  test('covers whole people in a video when asked', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-people').check();
+    await addFile(page, fixture('real/astronaut-pan.mp4'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('video-masks')).toContainText('کل آدم‌ها');
+    // The orange suit (well inside the person) is covered throughout.
+    for (const t of [0.2, 1.5, 2.8]) {
+      expect((await videoRegion(page, t, { x: 150 - Math.round(30 * t), y: 330, w: 50, h: 50 })).max, `body visible at ${t}s`).toBeLessThan(40);
+    }
   });
 
   test('with covering switched off, a video is only re-packaged', async ({ page }) => {

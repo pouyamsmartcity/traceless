@@ -13,6 +13,8 @@ which device a picture was taken, and covers faces and licence plates with solid
 - **Faces and plates covered, in photos and videos.** On-device detection finds faces (also small faces in crowds)
   and licence plates, including Iranian plates. Covers are solid fills, because blur and pixelation can sometimes be
   reversed. You can add or remove covers by hand. In videos, every frame is covered, following moving people.
+- **Whole people covered on request** (body, clothes, hair), for when clothes or hair could identify someone
+  (YOLOX-nano person detection, Apache-2.0).
 - **Text covered on request.** Street and shop signs, names and numbers (Persian and Latin script) can be covered
   too; tap a cover to keep a piece of text visible.
 - **Extra protection on request.** Makes it much harder to link a photo to a camera through its sensor's noise
@@ -45,8 +47,8 @@ Pakkon never claims a file is "100% safe". It does not hide:
 
 - what is visible in the picture: signs, landmarks, shadows, reflections, clothes, tattoos;
 - faces or plates the detector missed, so always look at the picture before sending. On 40 crowd photos from the
-  WIDER FACE set it covered 97% of faces 40 px or larger, 92% of faces 20-40 px, and about half of tiny faces under
-  20 px;
+  WIDER FACE set it covered 97% of faces 40 px or larger, 93% of faces 20-40 px, and 56% of tiny faces under 20 px
+  (each photo is also checked mirrored);
 - the camera sensor's noise pattern (PRNU), which can link photos to the same camera ("extra protection" makes this
   much harder, not impossible);
 - **words, accents and background sounds** in videos (voices can be changed or the sound removed);

@@ -3,7 +3,7 @@
  * Kept free of browser APIs so it can be unit-tested in Node.
  */
 
-export type ModelId = 'face' | 'plate' | 'text';
+export type ModelId = 'face' | 'plate' | 'text' | 'person';
 
 export interface ModelSpec {
   id: ModelId;
@@ -29,6 +29,8 @@ export const MODELS: Record<ModelId, ModelSpec> = {
   face: { id: 'face', file: 'models/face-yunet-2023mar.onnx', inputName: 'input', size: 640, pad: 0, pixels: 'bgr255', threshold: 0.5 },
   // YOLOv9-t licence plate detector (open-image-models, MIT). 640x640 input, RGB 0..1, NMS built in.
   plate: { id: 'plate', file: 'models/plate-yolov9t-640.onnx', inputName: 'images', size: 640, pad: 114, pixels: 'rgb01', threshold: 0.3 },
+  // YOLOX-nano (Megvii, Apache-2.0), COCO classes; we use "person". 416x416 input, BGR 0..255.
+  person: { id: 'person', file: 'models/person-yolox-nano.onnx', inputName: 'images', size: 416, pad: 114, pixels: 'bgr255', threshold: 0.35 },
   // PaddleOCR PP-OCRv3 text detection (Apache-2.0). Any size that is a multiple of 32. Outputs a text probability map.
   text: { id: 'text', file: 'models/text-ppocrv3-det.onnx', inputName: 'x', size: 0, pad: 0, pixels: 'bgrImagenet', threshold: TEXT_BOX_THRESHOLD },
 };
@@ -115,6 +117,35 @@ export function decodePlates(out: Float32Array, threshold: number): RawBox[] {
     const b = { x1: out[i + 1]!, y1: out[i + 2]!, x2: out[i + 3]!, y2: out[i + 4]!, score };
     if (b.x2 > b.x1 && b.y2 > b.y1) boxes.push(b);
   }
+  return boxes;
+}
+
+/**
+ * Decodes YOLOX output rows (per anchor: x, y, log w, log h, objectness, 80 class scores) for one class,
+ * into boxes in model pixels. Anchors run over strides 8, 16 and 32.
+ */
+export function decodeYolox(out: Float32Array, size: number, threshold: number, classIndex = 0): RawBox[] {
+  const stride = 85;
+  const boxes: RawBox[] = [];
+  let i = 0;
+  for (const s of [8, 16, 32]) {
+    const g = size / s;
+    for (let gy = 0; gy < g; gy++) {
+      for (let gx = 0; gx < g; gx++, i++) {
+        const o = i * stride;
+        if (o + stride > out.length) throw new Error('unexpected YOLOX output size');
+        const score = out[o + 4]! * out[o + 5 + classIndex]!;
+        if (!(score >= threshold)) continue;
+        const cx = (out[o]! + gx) * s;
+        const cy = (out[o + 1]! + gy) * s;
+        const w = Math.exp(out[o + 2]!) * s;
+        const h = Math.exp(out[o + 3]!) * s;
+        if (!Number.isFinite(w) || !Number.isFinite(h)) continue;
+        boxes.push({ x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2, score });
+      }
+    }
+  }
+  if (i * stride !== out.length) throw new Error('unexpected YOLOX output size');
   return boxes;
 }
 

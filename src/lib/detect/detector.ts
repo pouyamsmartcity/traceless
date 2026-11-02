@@ -24,6 +24,8 @@ export class DetectionError extends Error {
 export interface DetectOptions {
   faces: boolean;
   plates: boolean;
+  /** Whole people (body, clothes, hair). */
+  people?: boolean;
   /** Fewer passes, for video frames: one look at the whole frame, plus face tiles for large frames. */
   quick?: boolean;
   onProgress?: (fraction: number) => void;
@@ -32,7 +34,7 @@ export interface DetectOptions {
 type Pass = { model: ModelId; region: Rect };
 
 /** Plans which regions of a w x h image each model looks at. Exported for tests. */
-export function planPasses(w: number, h: number, opts: { faces: boolean; plates: boolean; quick?: boolean }): Pass[] {
+export function planPasses(w: number, h: number, opts: { faces: boolean; plates: boolean; people?: boolean; quick?: boolean }): Pass[] {
   const scale = Math.min(1, DETECT_MAX_SIDE / Math.max(w, h));
   if (opts.quick) {
     const full: Rect = { x: 0, y: 0, w, h };
@@ -46,6 +48,7 @@ export function planPasses(w: number, h: number, opts: { faces: boolean; plates:
       }
     }
     if (opts.plates) passes.push({ model: 'plate', region: full });
+    if (opts.people) passes.push({ model: 'person', region: full });
     return passes;
   }
   const dw = w * scale;
@@ -65,17 +68,25 @@ export function planPasses(w: number, h: number, opts: { faces: boolean; plates:
       for (const t of tiles(dw, dh, PLATE_TILE, 0.15)) passes.push({ model: 'plate', region: toSource(t) });
     }
   }
+  if (opts.people) {
+    passes.push({ model: 'person', region: full });
+    // People far away are small: look at parts of a large photo as well (with overlap, so nobody is cut).
+    if (Math.max(dw, dh) > 1.25 * PLATE_TILE) {
+      for (const t of tiles(dw, dh, PLATE_TILE, 0.3)) passes.push({ model: 'person', region: toSource(t) });
+    }
+  }
   return passes;
 }
 
 /** Merges raw detections from all passes into final mask boxes in source pixels. */
 export function mergeDetections(found: { model: ModelId; box: Rect; score: number }[], w: number, h: number): Detection[] {
   const result: Detection[] = [];
-  for (const model of ['face', 'plate'] as const) {
+  for (const model of ['face', 'plate', 'person'] as const) {
     const mine = found.filter((f) => f.model === model && f.box.w > 1 && f.box.h > 1).map((f) => ({ ...f.box, score: f.score }));
-    for (const b of nms(mine, 0.3)) {
-      // Grow masks a little: faces to cover hair and ears, plates to cover the frame and country strip.
-      const grown = model === 'face' ? expand(b, 0.15, 0.2, w, h) : expand(b, 0.12, 0.2, w, h);
+    // Overlapping people in a crowd are distinct: merge person boxes less eagerly.
+    for (const b of model === 'person' ? nms(mine, 0.6) : nms(mine, 0.3)) {
+      // Grow masks a little: faces to cover hair and ears, plates to cover the frame, people their outline.
+      const grown = model === 'face' ? expand(b, 0.15, 0.2, w, h) : model === 'plate' ? expand(b, 0.12, 0.2, w, h) : expand(b, 0.06, 0.04, w, h);
       result.push({ ...grown, score: b.score, kind: model });
     }
   }
@@ -161,7 +172,7 @@ export class Detector {
   }
 
   /** `srcScale` maps source-image pixels to pixels of `source` (which may be a pre-shrunk copy). */
-  private prepare(source: CanvasImageSource, srcScale: number, lb: Letterbox, pad: number, pixels: PixelFormat): Float32Array {
+  private prepare(source: CanvasImageSource, srcScale: number, lb: Letterbox, pad: number, pixels: PixelFormat, mirror = false): Float32Array {
     const size = lb.size;
     if (!this.canvas) {
       this.canvas = document.createElement('canvas');
@@ -175,6 +186,8 @@ export class Detector {
     const r = lb.region;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
+    // Mirrored: the same picture flipped left-right (the model finds some turned faces only this way).
+    ctx.setTransform(mirror ? -1 : 1, 0, 0, 1, mirror ? size : 0, 0);
     ctx.drawImage(
       source,
       r.x * srcScale,
@@ -186,6 +199,7 @@ export class Detector {
       Math.round(r.w * lb.scale),
       Math.round(r.h * lb.scale),
     );
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     return toTensor(ctx.getImageData(0, 0, size, size).data, size, pixels);
   }
 
@@ -218,6 +232,14 @@ export class Detector {
           const tensor = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels);
           const boxes = await this.infer(pass.model, tensor, spec.size, spec.size);
           for (const b of boxes) found.push({ model: pass.model, box: unletterbox(b, lb), score: b.score });
+          // Photos: faces are also looked for in the mirrored picture (+5% of small faces on our crowd set).
+          if (pass.model === 'face' && !opts.quick) {
+            const mirrored = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels, true);
+            for (const b of await this.infer('face', mirrored, spec.size, spec.size)) {
+              const unflipped = { x1: spec.size - b.x2, x2: spec.size - b.x1, y1: b.y1, y2: b.y2, score: b.score };
+              found.push({ model: 'face', box: unletterbox(unflipped, lb), score: b.score });
+            }
+          }
         } catch (e) {
           failure ??= e;
         }

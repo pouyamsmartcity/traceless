@@ -6,14 +6,14 @@ import { ICONS, append, clear, h, icon } from './dom';
 import { openEditor } from './editor';
 import { MAX_SEAL_BYTES, looksSealed, openSealed, sealOriginal, type OpenResult } from './seal-ui';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
-import { ensureText, locationRisks, lookForText, newItem, processItem, renderImage, sameOptions, sameVideoOptions, type Item, type Options } from './pipeline';
+import { ensurePeople, ensureText, locationRisks, lookForText, newItem, processItem, renderImage, sameOptions, sameVideoOptions, type Item, type Options } from './pipeline';
 
 interface Settings extends Options {
   lang: Lang;
 }
 
 function loadSettings(): Settings {
-  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false, voice: false };
+  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false, voice: false, people: false };
   try {
     const raw = localStorage.getItem('pakkon-settings');
     if (raw) {
@@ -26,6 +26,7 @@ function loadSettings(): Settings {
         text: s.text === true,
         mute: s.mute === true,
         voice: s.voice === true,
+        people: s.people === true,
       };
     }
   } catch {
@@ -210,7 +211,7 @@ export class App {
     });
     const touch = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 
-    const toggle = (key: 'faces' | 'plates' | 'text' | 'extra' | 'mute' | 'voice', label: string) => {
+    const toggle = (key: 'faces' | 'plates' | 'text' | 'extra' | 'mute' | 'voice' | 'people', label: string) => {
       const box = h('input', { type: 'checkbox', checked: this.settings[key], 'data-testid': `opt-${key}` });
       box.addEventListener('change', () => {
         this.settings[key] = box.checked;
@@ -263,6 +264,7 @@ export class App {
         toggle('faces', t.optFaces),
         toggle('plates', t.optPlates),
         toggle('text', t.optText),
+        toggle('people', t.optPeople),
         h('p', { className: 'group' }, t.groupSound),
         toggle('voice', t.optVoice),
         toggle('mute', t.optMute),
@@ -360,6 +362,11 @@ export class App {
         item.status = 'detecting';
         this.updateCard(item);
         await ensureText(item, this.detector);
+      }
+      if (this.settings.people && !item.peopleDetected) {
+        item.status = 'detecting';
+        this.updateCard(item);
+        await ensurePeople(item, this.detector);
       }
       item.status = 'cleaning';
       this.updateCard(item);
@@ -470,12 +477,14 @@ export class App {
       if (item.media === 'image') {
         // Count from the options this copy was really made with.
         const used = item.renderedWith ?? this.settings;
-        const count = (kind: 'face' | 'plate' | 'text') => item.detections.filter((d, i) => d.kind === kind && !item.removed.has(i)).length;
+        const count = (kind: 'face' | 'plate' | 'text' | 'person') => item.detections.filter((d, i) => d.kind === kind && !item.removed.has(i)).length;
         const faces = used.faces ? count('face') : 0;
         const plates = used.plates ? count('plate') : 0;
         const texts = used.text ? count('text') : undefined;
-        body.appendChild(h('p', { className: 'masks', 'data-testid': 'mask-summary' }, t.masksSummary(faces, plates, item.manual.length, texts)));
-        if (faces >= 10) body.appendChild(h('p', { className: 'note', 'data-testid': 'crowd' }, t.crowdCount(formatNumber(lang, faces))));
+        const people = used.people ? count('person') : undefined;
+        body.appendChild(h('p', { className: 'masks', 'data-testid': 'mask-summary' }, t.masksSummary(faces, plates, item.manual.length, texts, people)));
+        const crowd = Math.max(count('face'), item.peopleDetected ? count('person') : 0);
+        if (crowd >= 10) body.appendChild(h('p', { className: 'note', 'data-testid': 'crowd' }, t.crowdCount(formatNumber(lang, crowd))));
         const risks = locationRisks(item, used);
         if (risks.length) {
           body.appendChild(h('p', { className: 'warn', 'data-testid': 'location-risk' }, risks.map((r) => (r === 'text' ? t.riskText : r === 'plates' ? t.riskPlates : t.riskUnchecked)).join(' ')));
@@ -486,7 +495,7 @@ export class App {
       } else {
         // Say exactly what this video was made with.
         const made = item.videoMadeWith;
-        const kinds = (['faces', 'plates', 'text'] as const).filter((k) => made?.[k]);
+        const kinds = (['faces', 'plates', 'text', 'people'] as const).filter((k) => made?.[k]);
         const off = (['faces', 'plates'] as const).filter((k) => !made?.[k]);
         const videoNote =
           item.videoMasks === 'covered'

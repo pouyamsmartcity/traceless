@@ -29,6 +29,8 @@ export interface Item {
   detectFailed: boolean;
   /** Text detection has run for this photo. */
   textDetected: boolean;
+  /** Person detection has run for this photo. */
+  peopleDetected?: boolean;
   /** Number of text regions seen by a quick look when text covering is off (for the location warning). */
   textSeen?: number;
   droppedTracks: number;
@@ -68,6 +70,8 @@ export interface Options {
   extra: boolean;
   /** Cover text in photos (signs, names, numbers). */
   text: boolean;
+  /** Cover whole people (body, clothes, hair). */
+  people: boolean;
   /** Leave the sound out of videos. */
   mute: boolean;
   /** Change voices in videos. */
@@ -76,6 +80,7 @@ export interface Options {
 
 /** The options a video was made with (shown on its card; a rebuild is offered when they change). */
 export interface VideoOptions {
+  people: boolean;
   voice: boolean;
   text: boolean;
   faces: boolean;
@@ -123,7 +128,21 @@ export function randomName(ext: string): string {
 }
 
 export function kindEnabled(kind: Detection['kind'], opts: Options): boolean {
-  return kind === 'face' ? opts.faces : kind === 'plate' ? opts.plates : opts.text;
+  return kind === 'face' ? opts.faces : kind === 'plate' ? opts.plates : kind === 'person' ? opts.people : opts.text;
+}
+
+/** Runs person detection once for a photo, when covering whole people is first switched on. */
+export async function ensurePeople(item: Item, detector: Detector): Promise<void> {
+  if (item.peopleDetected || !item.decoded) return;
+  try {
+    item.detections.push(...(await detector.detect(item.decoded.element, item.decoded.width, item.decoded.height, { faces: false, plates: false, people: true })));
+  } catch (e) {
+    console.error('person detection failed', e);
+    item.detectFailed = true;
+    if (e instanceof DetectionError) item.detections.push(...e.partial);
+    item.needsReview = true;
+  }
+  item.peopleDetected = true;
 }
 
 /** Runs text detection once for a photo (it is only needed when text covering is switched on). */
@@ -214,22 +233,31 @@ export function effectiveVideoOptions(item: Item, o: Options): VideoOptions {
   const covered = !item.skipVideoMasks;
   const mute = item.soundOverride === 'mute' || o.mute;
   const voice = !mute && item.soundOverride !== 'keep' && o.voice;
-  return { faces: o.faces && covered, plates: o.plates && covered, text: o.text && covered, mute, voice };
+  return { faces: o.faces && covered, plates: o.plates && covered, text: o.text && covered, people: o.people && covered, mute, voice };
 }
 
 export function sameVideoOptions(item: Item, b: Options): boolean {
   const a = item.videoMadeWith;
   const e = effectiveVideoOptions(item, b);
-  return !!a && a.faces === e.faces && a.plates === e.plates && a.text === e.text && a.mute === e.mute && a.voice === e.voice;
+  return !!a && a.faces === e.faces && a.plates === e.plates && a.text === e.text && a.people === e.people && a.mute === e.mute && a.voice === e.voice;
 }
 
+/** Switches that change a photo's copy. Sound switches only affect videos. */
+const SOUND_SWITCHES = ['mute', 'voice'] as const;
+type PhotoSwitch = Exclude<keyof Options, (typeof SOUND_SWITCHES)[number]>;
+// Listing every photo switch is enforced by the type: adding a switch to Options without listing it fails to compile.
+const PHOTO_SWITCHES = ['faces', 'plates', 'text', 'people', 'extra'] as const satisfies readonly PhotoSwitch[];
+type Missing = Exclude<PhotoSwitch, (typeof PHOTO_SWITCHES)[number]>;
+const allListed: Missing extends never ? true : never = true;
+void allListed;
+
 export function sameOptions(a: Options | undefined, b: Options): boolean {
-  return !!a && a.faces === b.faces && a.plates === b.plates && a.text === b.text && a.extra === b.extra;
+  return !!a && PHOTO_SWITCHES.every((k) => a[k] === b[k]);
 }
 
 /** Whether the photo's automatic covering has to be checked by the user before the copy is offered. */
 export function coveringRequested(opts: Options): boolean {
-  return opts.faces || opts.plates || opts.text;
+  return opts.faces || opts.plates || opts.text || opts.people;
 }
 
 export async function processItem(item: Item, liveOpts: Options, detector: Detector, update: () => void): Promise<void> {
@@ -254,7 +282,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
       let bytes: Uint8Array | undefined;
       const mute = item.soundOverride === 'mute' || opts.mute;
       const voice = !mute && item.soundOverride !== 'keep' && opts.voice;
-      if ((opts.faces || opts.plates || opts.text) && !item.skipVideoMasks) {
+      if ((opts.faces || opts.plates || opts.text || opts.people) && !item.skipVideoMasks) {
         const { cleanVideoWithMasks } = await import('../lib/video-mask');
         item.abort = new AbortController();
         try {
@@ -263,6 +291,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
             faces: opts.faces,
             plates: opts.plates,
             text: opts.text,
+            people: opts.people,
             mute,
             voice,
             signal: item.abort.signal,
@@ -312,8 +341,10 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
         item.detections = await detector.detect(item.decoded.element, item.decoded.width, item.decoded.height, {
           faces: true,
           plates: true,
+          people: opts.people,
           onProgress: (p) => set('detecting', p),
         });
+        item.peopleDetected = opts.people;
       } catch (e) {
         console.error('detection failed', e);
         item.detectFailed = true;

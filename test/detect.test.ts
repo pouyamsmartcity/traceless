@@ -148,3 +148,28 @@ describe('text detection maths', () => {
     for (const p of big) expect(Math.max(p.inW, p.inH)).toBeLessThanOrEqual(1920);
   });
 });
+
+describe('YOLOX person decoding', () => {
+  it('decodes a confident person anchor and ignores the rest', async () => {
+    const { decodeYolox } = await import('../src/lib/detect/models');
+    const size = 416;
+    const anchors = (size / 8) ** 2 + (size / 16) ** 2 + (size / 32) ** 2;
+    const out = new Float32Array(anchors * 85);
+    // Anchor at stride 16, row 2, col 3 (index after all stride-8 anchors).
+    const i = (size / 8) ** 2 + 2 * (size / 16) + 3;
+    out.set([0.5, 0.5, Math.log(4), Math.log(8), 0.9, 0.9], i * 85);
+    const boxes = decodeYolox(out, size, 0.35);
+    expect(boxes).toHaveLength(1);
+    const b = boxes[0]!;
+    expect(b.score).toBeCloseTo(0.81);
+    expect((b.x1 + b.x2) / 2).toBeCloseTo((3 + 0.5) * 16);
+    expect(b.x2 - b.x1).toBeCloseTo(64);
+    expect(b.y2 - b.y1).toBeCloseTo(128);
+    expect(() => decodeYolox(new Float32Array(85 * 10), size, 0.35)).toThrow();
+  });
+
+  it('plans person passes only when asked', () => {
+    expect(planPasses(800, 600, { faces: false, plates: false, people: true }).map((p) => p.model)).toEqual(['person']);
+    expect(planPasses(4000, 3000, { faces: false, plates: false, people: true }).length).toBeGreaterThan(1);
+  });
+});

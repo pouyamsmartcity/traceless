@@ -5,7 +5,7 @@
  * runtime are loaded from this site's own files (and the page's CSP forbids anything else).
  */
 import * as ort from 'onnxruntime-web/wasm';
-import { MODELS, TEXT_PIXEL_THRESHOLD, decodePlates, decodeTextMap, decodeYunet, type ModelId, type RawBox } from './models';
+import { MODELS, TEXT_PIXEL_THRESHOLD, decodePlates, decodeTextMap, decodeYolox, decodeYunet, type ModelId, type RawBox } from './models';
 
 export type WorkerRequest =
   | { type: 'init'; base: string }
@@ -47,6 +47,7 @@ async function run(model: ModelId, tensor: Float32Array, width: number, height: 
     const first = results[s.outputNames[0]!];
     if (!first) throw new Error(`${model} model returned nothing`);
     if (model === 'text') return decodeTextMap(first.data as Float32Array, width, height, TEXT_PIXEL_THRESHOLD, spec.threshold);
+    if (model === 'person') return decodeYolox(first.data as Float32Array, spec.size, spec.threshold, 0);
     return decodePlates(first.data as Float32Array, spec.threshold);
   } finally {
     input.dispose();
