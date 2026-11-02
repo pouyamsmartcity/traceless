@@ -43,10 +43,11 @@ describe('inspectImage', () => {
 });
 
 describe('edit hints', () => {
-  it('notices an editor, a later modify date and a cropped picture', async () => {
+  it('notices an editor and a later modify date, and keeps the thumbnail for comparing', async () => {
     const r = await inspectImage(fixture('photo-edited.jpg'));
     const ids = r.hints.map((h) => h.id);
-    expect(ids).toEqual(expect.arrayContaining(['editingSoftware', 'dateMismatch', 'thumbnailCropped']));
+    expect(ids).toEqual(expect.arrayContaining(['editingSoftware', 'dateMismatch']));
+    expect(r.thumbnail?.length).toBeGreaterThan(100);
     expect(r.hints.find((h) => h.id === 'editingSoftware')?.value).toContain('Photoshop');
     expect(ids).not.toContain('noCameraData');
   });
@@ -60,7 +61,6 @@ describe('edit hints', () => {
   it('gives no edit hints for an ordinary camera photo', async () => {
     const r = await inspectImage(fixture('photo-everything.jpg'));
     expect(r.hints.map((h) => h.id)).not.toContain('editingSoftware');
-    expect(r.hints.map((h) => h.id)).not.toContain('thumbnailCropped');
     expect(r.thumbnail?.length).toBeGreaterThan(100);
   });
 });

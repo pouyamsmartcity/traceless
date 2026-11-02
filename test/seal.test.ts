@@ -39,3 +39,32 @@ describe('sealed originals', () => {
     expect(Buffer.from(a.sealed).equals(Buffer.from(b.sealed))).toBe(false);
   }, 30_000);
 });
+
+describe('passphrases typed on different keyboards', () => {
+  it('opens with the same phrase typed with Arabic letters, Persian digits or a zero-width joiner', async () => {
+    const { normalizePassphrase } = await import('../src/lib/seal');
+    const persian = 'رمز یک کیف ۱۲۳۴';
+    const arabicKeyboard = 'رمز يك كيف 1234';
+    const withZwnj = 'رمز\u200cیک کیف ١٢٣٤';
+    expect(normalizePassphrase(arabicKeyboard)).toBe(normalizePassphrase(persian));
+    const { sealed } = await seal(original, { name: 'a.jpg', type: 'image/jpeg' }, persian + ' اضافه');
+    await expect(unseal(sealed, arabicKeyboard + ' اضافه')).resolves.toBeTruthy();
+    expect(normalizePassphrase(withZwnj)).toBe(normalizePassphrase('رمزیک کیف ۱۲۳۴'));
+  }, 60_000);
+});
+
+describe('seal code', () => {
+  it('is not the plain fingerprint and changes with every seal', async () => {
+    const a = await seal(original, { name: 'a', type: 'b' }, 'correct horse battery');
+    const b = await seal(original, { name: 'a', type: 'b' }, 'correct horse battery');
+    expect(a.header.code).not.toBe(a.header.sha256);
+    expect(a.header.code).not.toBe(b.header.code);
+    expect(a.header.code).toMatch(/^[0-9a-f]{64}$/);
+  }, 30_000);
+
+  it('refuses files too large to seal', async () => {
+    const { MAX_SEAL_BYTES } = await import('../src/lib/seal');
+    const big = { length: MAX_SEAL_BYTES + 1 } as unknown as Uint8Array;
+    await expect(seal(big, { name: 'a', type: 'b' }, 'correct horse battery')).rejects.toMatchObject({ reason: 'tooLarge' });
+  });
+});

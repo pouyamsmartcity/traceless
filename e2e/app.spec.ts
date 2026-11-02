@@ -354,18 +354,20 @@ test.describe('Pakkon', () => {
     await page.goto('/');
     await addFile(page, fixture('leaky/photo-edited.jpg'));
     let item = await readyItem(page);
-    for (const id of ['editingSoftware', 'dateMismatch', 'thumbnailCropped']) {
+    for (const id of ['editingSoftware', 'dateMismatch', 'thumbnailDiffers']) {
       await expect(item.locator(`[data-hint="${id}"]`)).toBeVisible();
     }
     // This photo's hidden thumbnail is a different (pink) picture: noticed by comparing the pixels.
     await addFile(page, fixture('leaky/photo-everything.jpg'));
     item = await readyItem(page);
     await expect(item.locator('[data-hint="thumbnailDiffers"]')).toBeVisible();
-    // An unedited photo whose thumbnail matches gets no edit hints.
-    await addFile(page, fixture('leaky/photo-honest.jpg'));
-    item = await readyItem(page);
-    await expect(item.getByTestId('findings')).toBeVisible();
-    await expect(item.getByTestId('hints')).toHaveCount(0);
+    // Unedited photos get no edit hints, also with thumbnails of another shape or a mirrored orientation.
+    for (const name of ['photo-honest.jpg', 'photo-honest-wide-bars.jpg', 'photo-honest-wide-crop.jpg', 'photo-honest-mirrored.jpg']) {
+      await addFile(page, fixture(`leaky/${name}`));
+      item = await readyItem(page);
+      await expect(item.getByTestId('findings')).toBeVisible();
+      await expect(item.getByTestId('hints'), name).toHaveCount(0);
+    }
   });
 
   test('seals the original with a passphrase, and opens it again to prove it is unchanged', async ({ page }) => {
@@ -383,8 +385,12 @@ test.describe('Pakkon', () => {
     const file = await download;
     expect(file.suggestedFilename()).toMatch(/^sealed-[a-z0-9]{6}\.pakkon$/);
     const sealedPath = await file.path();
-    const expected = createHash('sha256').update(readFileSync(fixture('leaky/photo-everything.jpg'))).digest('hex');
-    await expect(item.getByTestId('sealed-note')).toContainText(expected);
+    const sha = createHash('sha256').update(readFileSync(fixture('leaky/photo-everything.jpg'))).digest('hex');
+    // A seal code is shown (safe to note down), never the plain fingerprint of the original.
+    const note = (await item.getByTestId('sealed-note').innerText()) ?? '';
+    const code = /[0-9a-f]{64}/.exec(note)?.[0];
+    expect(code).toBeDefined();
+    expect(code).not.toBe(sha);
     // The sealed file reveals nothing readable.
     const sealedBytes = readFileSync(sealedPath!);
     expect(sealedBytes.toString('latin1')).not.toContain('FakePhone');
@@ -399,7 +405,8 @@ test.describe('Pakkon', () => {
     await page.getByTestId('passphrase-ok').click();
     const card = page.getByTestId('sealed-card').first();
     await expect(card).toContainText('دست نخورده');
-    await expect(card).toContainText(expected);
+    await expect(card).toContainText(code!);
+    await expect(card).not.toContainText(sha);
     await expect(card).toContainText('photo-everything.jpg');
   });
 
@@ -561,6 +568,25 @@ test.describe('Pakkon', () => {
     await expect(item.getByTestId('muted-note')).toBeVisible();
     const { bytes } = await outputBytes(page);
     expect((await inspectVideo(sourceFromBytes(bytes))).tracks).toEqual(['vide']);
+  });
+
+  test('switching faces on while a video is being made: the note tells the truth and offers a remake', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-faces').uncheck();
+    await addFile(page, fixture('real/astronaut-pan.mp4'));
+    const item = page.getByTestId('item').first();
+    await expect(item.getByTestId('item-status')).toHaveAttribute('class', /detecting|cleaning/, { timeout: 30_000 });
+    await page.getByTestId('opt-faces').check();
+    await readyItem(page);
+    // Made without faces covered: the card says so and offers to make it again.
+    await expect(item.getByTestId('video-uncovered')).toContainText('صورت');
+    await expect(item.getByTestId('rebuild')).toBeVisible();
+    expect((await videoRegion(page, 0.1, { x: 204, y: 98, w: 40, h: 40 })).max).toBeGreaterThan(100);
+    await item.getByTestId('rebuild').click();
+    await readyItem(page);
+    await expect(item.getByTestId('video-uncovered')).toHaveCount(0);
+    await expect(item.getByTestId('rebuild')).toHaveCount(0);
+    expect((await videoRegion(page, 0.1, { x: 204, y: 98, w: 40, h: 40 })).max).toBeLessThan(40);
   });
 
   test('with covering switched off, a video is only re-packaged', async ({ page }) => {

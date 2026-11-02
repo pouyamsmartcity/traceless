@@ -50,8 +50,10 @@ export interface Item {
   skipVideoMasks?: boolean;
   /** Video: the options its safe copy was made with. */
   videoMadeWith?: VideoOptions;
-  /** Fingerprint of the original, once it was sealed. */
-  sealedSha256?: string;
+  /** Seal code of the original, once it was sealed (safe to note down). */
+  sealCode?: string;
+  /** Video: the new file has sound. */
+  audioKept?: boolean;
   /** Video: the user's choice after a voice change was not possible on this device. */
   soundOverride?: 'mute' | 'keep';
   error?: ErrorKind;
@@ -149,13 +151,15 @@ export async function lookForText(item: Item, detector: Detector): Promise<void>
     const found = await detector.detectText(item.decoded.element, item.decoded.width, item.decoded.height, undefined, true);
     item.textSeen = found.length;
   } catch {
-    item.textSeen = 0;
+    // Unknown, not zero: the card asks the user to look for writing themselves.
+    item.textSeen = -1;
   }
 }
 
 /** Plain-language reasons why a photo may still reveal where it was taken, after cleaning. */
-export function locationRisks(item: Item, opts: Options): ('text' | 'plates')[] {
-  const risks: ('text' | 'plates')[] = [];
+export function locationRisks(item: Item, opts: Options): ('text' | 'plates' | 'unchecked')[] {
+  const risks: ('text' | 'plates' | 'unchecked')[] = [];
+  if (!opts.text && item.textSeen === -1) risks.push('unchecked');
   const visible = (kind: 'text' | 'plate') =>
     item.detections.some((d, i) => d.kind === kind && (item.removed.has(i) || !kindEnabled(kind, opts)));
   if (opts.text ? visible('text') : (item.textSeen ?? 0) > 0 || item.detections.some((d) => d.kind === 'text')) risks.push('text');
@@ -205,8 +209,18 @@ export async function renderImage(item: Item, opts: Options): Promise<void> {
   item.renderedWith = snapshot;
 }
 
-export function sameVideoOptions(a: VideoOptions | undefined, b: Options): boolean {
-  return !!a && a.faces === b.faces && a.plates === b.plates && a.text === b.text && a.mute === b.mute && a.voice === (b.voice && !b.mute);
+/** What a video would be made with now, given the switches and the user's earlier choices for this video. */
+export function effectiveVideoOptions(item: Item, o: Options): VideoOptions {
+  const covered = !item.skipVideoMasks;
+  const mute = item.soundOverride === 'mute' || o.mute;
+  const voice = !mute && item.soundOverride !== 'keep' && o.voice;
+  return { faces: o.faces && covered, plates: o.plates && covered, text: o.text && covered, mute, voice };
+}
+
+export function sameVideoOptions(item: Item, b: Options): boolean {
+  const a = item.videoMadeWith;
+  const e = effectiveVideoOptions(item, b);
+  return !!a && a.faces === e.faces && a.plates === e.plates && a.text === e.text && a.mute === e.mute && a.voice === e.voice;
 }
 
 export function sameOptions(a: Options | undefined, b: Options): boolean {
@@ -218,7 +232,10 @@ export function coveringRequested(opts: Options): boolean {
   return opts.faces || opts.plates || opts.text;
 }
 
-export async function processItem(item: Item, opts: Options, detector: Detector, update: () => void): Promise<void> {
+export async function processItem(item: Item, liveOpts: Options, detector: Detector, update: () => void): Promise<void> {
+  // Use the options as they were when processing started: switches changed meanwhile are handled
+  // afterwards (photos are remade, videos offer "make again"), so notes always match the delivered file.
+  const opts: Options = { ...liveOpts };
   const set = (status: ItemStatus, progress?: number) => {
     item.status = status;
     if (progress === undefined) delete item.progress;
@@ -253,6 +270,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
           });
           bytes = r.bytes;
           item.droppedTracks = r.droppedTracks;
+          item.audioKept = r.audioKept;
           item.videoMasks = 'covered';
           item.videoObjects = r.maxObjects;
         } catch (e) {
@@ -269,9 +287,9 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
         const result = await cleanVideo(item.file, (p) => set('cleaning', p), { mute, voice });
         bytes = result.bytes;
         item.droppedTracks = result.droppedTracks;
+        item.audioKept = result.audioKept;
       }
-      const covered = !item.skipVideoMasks;
-      item.videoMadeWith = { faces: opts.faces && covered, plates: opts.plates && covered, text: opts.text && covered, mute, voice };
+      item.videoMadeWith = effectiveVideoOptions(item, opts);
       setOutput(item, new Blob([bytes as BlobPart], { type: 'video/mp4' }), 'mp4');
       item.output!.name = item.output!.name.replace(/^img-/, 'vid-');
     } else {
@@ -285,7 +303,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
       }
       item.decoded = await decodeImage(item.file);
       item.hints = inspection.hints;
-      if (inspection.thumbnail && !item.hints.some((x) => x.id === 'thumbnailCropped')) {
+      if (inspection.thumbnail) {
         const diff = await thumbnailDifference(inspection.thumbnail, item.decoded, inspection.orientation);
         if (diff !== undefined && diff > THUMBNAIL_DIFF) item.hints.push({ id: 'thumbnailDiffers' });
       }

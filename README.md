@@ -18,7 +18,7 @@ which device a picture was taken, and covers faces and licence plates with solid
 - **Extra protection on request.** Makes it much harder to link a photo to a camera through its sensor's noise
   pattern (smaller, very slightly turned and trimmed picture, fresh grain).
 - **Change voices or remove the sound** in videos on request (voices and background sounds can identify people
-  and places). Voices are made deeper by a random factor; words and accents stay.
+  and places). Voices are made deeper by a random, slowly drifting factor: this stops casual listeners, not someone who works to undo it; words and accents stay. Removing the sound is the safe choice.
 - **Seal the original** (optional): lock the untouched original with a passphrase and record its fingerprint, to
   prove one day that a shared photo is real, without ever sharing the original. Open a `.pakkon` file in Pakkon to
   check it.

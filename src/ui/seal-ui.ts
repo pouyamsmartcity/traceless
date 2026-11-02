@@ -1,17 +1,41 @@
-import { SealError, isSealed, passphraseProblem, seal, unseal, type SealHeader } from '../lib/seal';
+import { MAX_SEAL_BYTES, SealError, isSealed, normalizePassphrase, passphraseProblem, seal, unseal, type SealHeader } from '../lib/seal';
+
+export { MAX_SEAL_BYTES };
 import { ICONS, h, icon } from './dom';
 import type { Strings } from './i18n';
+
+/**
+ * A passphrase field the browser will not offer to save or sync: a plain text field drawn with hidden
+ * characters where supported (no <form>, no password manager prompt), else a password field with autofill off.
+ */
+function secretField(testId: string): HTMLInputElement {
+  const masked = typeof CSS !== 'undefined' && CSS.supports?.('-webkit-text-security', 'disc');
+  const el = h('input', {
+    type: masked ? 'text' : 'password',
+    autocomplete: 'off',
+    autocapitalize: 'off',
+    autocorrect: 'off',
+    spellcheck: 'false',
+    name: `p${Math.random().toString(36).slice(2)}`,
+    dir: 'ltr',
+    'data-testid': testId,
+    'data-lpignore': 'true',
+    'data-1p-ignore': 'true',
+  });
+  if (masked) el.classList.add('masked');
+  return el;
+}
 
 /** Asks for a passphrase in a small dialog. Resolves null when cancelled. */
 export function askPassphrase(t: Strings, mode: 'seal' | 'open'): Promise<string | null> {
   return new Promise((resolve) => {
-    const pass = h('input', { type: 'password', autocomplete: mode === 'seal' ? 'new-password' : 'current-password', dir: 'ltr', 'data-testid': 'passphrase' });
-    const confirm = h('input', { type: 'password', autocomplete: 'new-password', dir: 'ltr', 'data-testid': 'passphrase-confirm' });
+    const pass = secretField('passphrase');
+    const confirm = secretField('passphrase-confirm');
     const error = h('p', { className: 'error', role: 'alert' });
-    const ok = h('button', { type: 'submit', className: 'btn primary', 'data-testid': 'passphrase-ok' }, icon(ICONS.lock), mode === 'seal' ? t.sealDo : t.sealOpen);
+    const ok = h('button', { type: 'button', className: 'btn primary', 'data-testid': 'passphrase-ok' }, icon(ICONS.lock), mode === 'seal' ? t.sealDo : t.sealOpen);
     const cancel = h('button', { type: 'button', className: 'btn ghost' }, t.editorCancel);
-    const form = h(
-      'form',
+    const sheet = h(
+      'div',
       { className: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': mode === 'seal' ? t.sealTitle : t.openSealTitle },
       h('h2', {}, mode === 'seal' ? t.sealTitle : t.openSealTitle),
       h('p', { className: 'note' }, mode === 'seal' ? t.sealExplain : t.openSealExplain),
@@ -20,7 +44,7 @@ export function askPassphrase(t: Strings, mode: 'seal' | 'open'): Promise<string
       error,
       h('div', { className: 'actions' }, ok, cancel),
     );
-    const overlay = h('div', { className: 'overlay' }, form);
+    const overlay = h('div', { className: 'overlay' }, sheet);
     document.body.appendChild(overlay);
     pass.focus();
     const close = (v: string | null) => {
@@ -29,20 +53,26 @@ export function askPassphrase(t: Strings, mode: 'seal' | 'open'): Promise<string
       overlay.remove();
       resolve(v);
     };
-    cancel.addEventListener('click', () => close(null));
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
+    const submit = () => {
       if (mode === 'seal') {
         if (passphraseProblem(pass.value)) {
           error.textContent = t.passphraseShort;
           return;
         }
-        if (pass.value !== confirm.value) {
+        if (normalizePassphrase(pass.value) !== normalizePassphrase(confirm.value)) {
           error.textContent = t.passphraseMismatch;
           return;
         }
       }
       close(pass.value);
+    };
+    cancel.addEventListener('click', () => close(null));
+    ok.addEventListener('click', submit);
+    sheet.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submit();
+      } else if (e.key === 'Escape') close(null);
     });
   });
 }

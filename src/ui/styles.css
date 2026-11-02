@@ -622,3 +622,14 @@ code.hash {
   font-size: 0.8rem;
   overflow-wrap: anywhere;
 }
+
+input.masked {
+  -webkit-text-security: disc;
+}
+
+.open-sealed {
+  display: block;
+  margin-top: 12px;
+  text-align: center;
+  cursor: pointer;
+}

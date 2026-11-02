@@ -74,6 +74,8 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
     const canEncode = typeof VideoEncoder !== 'undefined' && (await canEncodeVideo('avc', { width: W, height: H }).catch(() => false));
     if (!canDecode || !canEncode) throw new VideoCleanError('cannotMask', `decode ${canDecode}, encode ${canEncode}`);
 
+    // Check that the sound can be handled as asked before the long detection pass (fails early).
+    const sound = await soundConversion({ mute: opts.mute ?? false, voice: opts.voice ?? false });
     // Pass 1: look for faces and plates in sampled frames (display orientation).
     const start = await track.getFirstTimestamp();
     // The new file starts at 0; frames are shifted by the start of the kept tracks. Pass 1 works on original
@@ -123,7 +125,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       tracks: 'primary',
       tags: {},
       showWarnings: false,
-      ...(await soundConversion({ mute: opts.mute ?? false, voice: opts.voice ?? false })),
+      ...sound,
       trim: { start: shift },
       video: {
         codec: 'avc',
@@ -159,7 +161,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       throw new VideoCleanError('cannotMask', 'conversion not possible');
     }
     conversion.onProgress = (p) => opts.onProgress?.('encode', Math.max(0, Math.min(1, p)));
-    const onAbort = () => void conversion.cancel();
+    const onAbort = () => void conversion.cancel().catch(() => undefined);
     opts.signal?.addEventListener('abort', onAbort);
     try {
       await conversion.execute();
@@ -176,6 +178,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
     return {
       bytes,
       droppedTracks: Math.max(0, before.tracks.length - conversion.utilizedTracks.length),
+      audioKept: conversion.utilizedTracks.some((t) => t.isAudioTrack()),
       framesWithMasks,
       maxObjects,
     };

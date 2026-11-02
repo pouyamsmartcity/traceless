@@ -23,7 +23,7 @@ export function sniffImage(b: Uint8Array): ImageKind {
 }
 
 /** Signs that a received photo was edited or re-saved. Hints for checking a source, never proof. */
-export type HintId = 'editingSoftware' | 'dateMismatch' | 'thumbnailCropped' | 'thumbnailDiffers' | 'noCameraData';
+export type HintId = 'editingSoftware' | 'dateMismatch' | 'thumbnailDiffers' | 'noCameraData';
 
 export interface Hint {
   id: HintId;
@@ -251,14 +251,8 @@ export async function inspectImage(b: Uint8Array): Promise<ImageInspection> {
     try {
       const thumb = await exifr.thumbnail(b);
       if (thumb && thumb.length) {
-        const t = new Uint8Array(thumb);
-        result.thumbnail = t;
-        const ts = jpegSize(t);
-        const ms = jpegSize(b);
-        // A thumbnail with a different shape usually means the picture was cropped after it was taken.
-        if (ts && ms && Math.abs(ts.width / ts.height - ms.width / ms.height) > 0.06) {
-          hints.push({ id: 'thumbnailCropped', value: `${ts.width}×${ts.height} / ${ms.width}×${ms.height}` });
-        }
+        // Compared with the picture in the browser (pixels), where both can be decoded.
+        result.thumbnail = new Uint8Array(thumb);
       }
     } catch {
       // A broken thumbnail is not a reason to stop.

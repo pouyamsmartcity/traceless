@@ -4,7 +4,7 @@ import type { Finding } from '../lib/findings';
 import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon } from './dom';
 import { openEditor } from './editor';
-import { looksSealed, openSealed, sealOriginal } from './seal-ui';
+import { MAX_SEAL_BYTES, looksSealed, openSealed, sealOriginal, type OpenResult } from './seal-ui';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
 import { ensureText, locationRisks, lookForText, newItem, processItem, renderImage, sameOptions, sameVideoOptions, type Item, type Options } from './pipeline';
 
@@ -107,11 +107,27 @@ export class App {
     this.updateBulk();
   }
 
+  /** Opened sealed files, kept in the app's state so they survive a language switch and can be forgotten. */
+  private readonly opened: { id: number; result: OpenResult; url?: string }[] = [];
+  private openedSeq = 1;
+
   private async openSealedFile(file: File): Promise<void> {
+    try {
+      if (!(await looksSealed(file))) return;
+      const result = await openSealed(file, this.t);
+      if (!result.ok && result.reason === 'cancelled') return;
+      const entry: { id: number; result: OpenResult; url?: string } = { id: this.openedSeq++, result };
+      if (result.ok) entry.url = URL.createObjectURL(result.original);
+      this.opened.unshift(entry);
+      this.listEl.prepend(this.sealedCard(entry));
+    } catch (e) {
+      console.error('could not open sealed file', e);
+    }
+  }
+
+  private sealedCard(entry: { id: number; result: OpenResult; url?: string }): HTMLElement {
     const t = this.t;
-    if (!(await looksSealed(file))) return;
-    const r = await openSealed(file, t);
-    if (!r.ok && r.reason === 'cancelled') return;
+    const r = entry.result;
     const card = h('article', { className: 'card sealed-card', 'data-testid': 'sealed-card' });
     const body = h('div', { className: 'card-body' });
     card.appendChild(body);
@@ -121,18 +137,24 @@ export class App {
       body.appendChild(h('p', { className: 'status ready' }, icon(ICONS.check, 18), t.openedTitle));
       const row = (k: string, v: string) => h('li', {}, h('span', { className: 'label' }, k), h('span', { className: 'value', dir: 'ltr' }, v));
       body.appendChild(
-        h('ul', { className: 'facts' }, row(t.openedName, r.header.name), row(t.openedWhen, r.header.sealedAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC')), row(t.openedFingerprint, r.header.sha256)),
+        h('ul', { className: 'facts' }, row(t.openedName, r.header.name), row(t.openedWhen, r.header.sealedAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC')), row(t.sealCode, r.header.code)),
       );
-      const url = URL.createObjectURL(r.original);
-      const save = h('a', { className: 'btn', href: url, download: r.original.name, 'data-testid': 'save-original' }, icon(ICONS.save), t.saveOriginal);
+      body.appendChild(h('p', { className: 'note' }, t.openedExplain));
+      const save = h('a', { className: 'btn', href: entry.url ?? '#', download: r.original.name, 'data-testid': 'save-original' }, icon(ICONS.save), t.saveOriginal);
       const safe = h('button', { type: 'button', className: 'btn primary' }, t.makeSafeFromOriginal);
       safe.addEventListener('click', () => this.addFiles([r.original]));
       body.appendChild(h('div', { className: 'actions' }, safe, save));
     }
-    const rm = h('button', { type: 'button', className: 'link' }, t.remove);
-    rm.addEventListener('click', () => card.remove());
+    const rm = h('button', { type: 'button', className: 'link' }, t.forgetOpened);
+    rm.addEventListener('click', () => {
+      // Forget the decrypted original: release its memory and remove the card.
+      if (entry.url) URL.revokeObjectURL(entry.url);
+      const i = this.opened.indexOf(entry);
+      if (i >= 0) this.opened.splice(i, 1);
+      card.remove();
+    });
     body.appendChild(rm);
-    this.listEl.prepend(card);
+    return card;
   }
 
   private enqueue(item: Item): void {
@@ -156,7 +178,7 @@ export class App {
 
     const input = h('input', {
       type: 'file',
-      accept: 'image/*,video/*,.pakkon',
+      accept: 'image/*,video/*',
       multiple: true,
       className: 'visually-hidden',
       'data-testid': 'file-input',
@@ -164,6 +186,14 @@ export class App {
     input.addEventListener('change', () => {
       if (input.files?.length) this.addFiles(Array.from(input.files));
       input.value = '';
+    });
+
+    // Any file type: phones' photo pickers do not offer .pakkon files.
+    const sealedInput = h('input', { type: 'file', className: 'visually-hidden', 'data-testid': 'sealed-input' });
+    sealedInput.addEventListener('change', () => {
+      const f = sealedInput.files?.[0];
+      if (f) void this.openSealedFile(f);
+      sealedInput.value = '';
     });
 
     // On phones: take a photo or video inside Pakkon, so the original never lands in the gallery.
@@ -213,6 +243,7 @@ export class App {
     }
 
     this.listEl = h('section', { className: 'items', 'aria-live': 'polite' });
+    for (const entry of this.opened) this.listEl.appendChild(this.sealedCard(entry));
     for (const item of this.items) {
       this.listEl.appendChild(this.cardFor(item));
       this.updateCard(item);
@@ -261,6 +292,7 @@ export class App {
       this.listEl,
       h('details', { className: 'info' }, h('summary', {}, t.howTitle), h('ul', {}, ...t.how.map((s) => h('li', {}, s)))),
       h('details', { className: 'info' }, h('summary', {}, t.limitsTitle), h('ul', {}, ...t.limits.map((s) => h('li', {}, s)))),
+      h('label', { className: 'link open-sealed' }, sealedInput, t.openSealedLink),
       installEl,
       h(
         'footer',
@@ -446,24 +478,35 @@ export class App {
         if (faces >= 10) body.appendChild(h('p', { className: 'note', 'data-testid': 'crowd' }, t.crowdCount(formatNumber(lang, faces))));
         const risks = locationRisks(item, used);
         if (risks.length) {
-          body.appendChild(h('p', { className: 'warn', 'data-testid': 'location-risk' }, risks.map((r) => (r === 'text' ? t.riskText : t.riskPlates)).join(' ')));
+          body.appendChild(h('p', { className: 'warn', 'data-testid': 'location-risk' }, risks.map((r) => (r === 'text' ? t.riskText : r === 'plates' ? t.riskPlates : t.riskUnchecked)).join(' ')));
         }
         if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
         if (used.extra) body.appendChild(h('p', { className: 'note', 'data-testid': 'extra-note' }, t.extraApplied));
         body.appendChild(h('p', { className: 'note' }, t.checkPicture));
       } else {
-        const videoNote = { covered: t.videoCovered, off: t.videoMasksOff, unavailable: t.videoMasksUnavailable }[item.videoMasks ?? 'off'];
+        // Say exactly what this video was made with.
+        const made = item.videoMadeWith;
+        const kinds = (['faces', 'plates', 'text'] as const).filter((k) => made?.[k]);
+        const off = (['faces', 'plates'] as const).filter((k) => !made?.[k]);
+        const videoNote =
+          item.videoMasks === 'covered'
+            ? t.videoCovered(kinds.map((k) => t.kindNames[k]).join(t.listJoin))
+            : item.videoMasks === 'unavailable'
+              ? t.videoMasksUnavailable
+              : t.videoMasksOff;
         body.appendChild(h('p', { className: item.videoMasks === 'covered' ? 'note' : 'warn', 'data-testid': 'video-masks', 'data-state': item.videoMasks ?? 'off' }, videoNote));
+        if (item.videoMasks === 'covered' && off.length) {
+          body.appendChild(h('p', { className: 'warn', 'data-testid': 'video-uncovered' }, t.videoUncovered(off.map((k) => t.kindNames[k]).join(t.listJoin))));
+        }
         if (item.droppedTracks > 0) body.appendChild(h('p', { className: 'note' }, t.videoDropped(item.droppedTracks)));
         if (item.videoMadeWith?.mute) body.appendChild(h('p', { className: 'note', 'data-testid': 'muted-note' }, t.videoMuted));
-        if (item.videoMadeWith?.voice) body.appendChild(h('p', { className: 'note', 'data-testid': 'voice-note' }, t.videoVoiced));
-        if (!sameVideoOptions(item.videoMadeWith, this.settings)) {
+        if (item.videoMadeWith?.voice && item.audioKept) body.appendChild(h('p', { className: 'note', 'data-testid': 'voice-note' }, t.videoVoiced));
+        if (!item.videoMadeWith?.mute && item.audioKept === false) body.appendChild(h('p', { className: 'note', 'data-testid': 'no-sound-note' }, t.videoNoSound));
+        if (!sameVideoOptions(item, this.settings)) {
           const again = h('button', { type: 'button', className: 'btn ghost small', 'data-testid': 'rebuild' }, t.rebuildVideo);
           again.addEventListener('click', () => {
             if (item.output) URL.revokeObjectURL(item.output.url);
             delete item.output;
-            delete item.skipVideoMasks;
-            delete item.soundOverride;
             item.status = 'queued';
             this.updateCard(item);
             this.enqueue(item);
@@ -475,8 +518,8 @@ export class App {
       else body.appendChild(this.actions(item));
     }
 
-    if (item.sealedSha256) {
-      body.appendChild(h('p', { className: 'note', 'data-testid': 'sealed-note' }, t.sealedDone, ' ', h('code', { dir: 'ltr', className: 'hash' }, item.sealedSha256)));
+    if (item.sealCode) {
+      body.appendChild(h('p', { className: 'note', 'data-testid': 'sealed-note' }, t.sealedDone, ' ', h('code', { dir: 'ltr', className: 'hash' }, item.sealCode)));
     }
     if (item.findings.length || item.status === 'ready') body.appendChild(this.findingsView(item));
     if (item.status === 'ready') {
@@ -527,13 +570,16 @@ export class App {
     row.appendChild(save);
     const sealBtn = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'seal' }, icon(ICONS.lock), t.sealOriginal);
     sealBtn.addEventListener('click', async () => {
-      if (item.file.size > 1024 ** 3) {
+      if (item.file.size > MAX_SEAL_BYTES) {
         alert(t.errSealTooLarge);
         return;
       }
-      const r = await sealOriginal(item.file, t);
+      const r = await sealOriginal(item.file, t).catch((e: unknown) => {
+        console.error(e);
+        return null;
+      });
       if (!r) return;
-      item.sealedSha256 = r.header.sha256;
+      item.sealCode = r.header.code;
       this.updateCard(item);
       await shareOrSave([r.file], true);
     });
@@ -634,7 +680,10 @@ export class App {
   private updateBulk(): void {
     if (!this.bulkEl) return;
     clear(this.bulkEl);
-    const ready = this.items.filter((i) => i.status === 'ready' && i.output);
+    // Only copies that are ready to send: not waiting for a check, not made with outdated switches.
+    const ready = this.items.filter(
+      (i) => i.status === 'ready' && i.output && !i.needsReview && (i.media === 'image' || sameVideoOptions(i, this.settings)),
+    );
     if (ready.length < 2) return;
     const files = ready.map((i) => new File([i.output!.blob], i.output!.name, { type: i.output!.blob.type }));
     if (!canShareFiles(files)) return;

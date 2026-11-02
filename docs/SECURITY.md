@@ -14,8 +14,8 @@ This page says plainly what it protects against, how that is checked, and where 
 | Data inside the video stream (H.264/HEVC SEI, AV1 metadata: camcorders store time, model and GPS there) | Every video is rebuilt packet by packet without these units | Every packet of the output is scanned; any unit left blocks delivery |
 | Faces, licence plates, text in the picture | On-device detection; solid fills (blur can be reversed); tap to add or remove covers | Tested on a public-domain portrait, an Iranian plate and street signs; crowd recall measured on WIDER FACE |
 | Moving faces in videos | Frames sampled three times a second; masks follow matched faces and are held across one missed detection | Tested on panning videos, a rotated video and a late-starting MPEG-TS file |
-| Voices in videos | Optional voice change (pitch and formants lowered by a random factor) or sound removal | Pitch measured in the output in a browser test; if the browser cannot encode audio, the user chooses instead of a silent fallback |
-| Needing to prove later that a shared photo is real | Optional sealed original: the untouched file, encrypted with a passphrase (PBKDF2-SHA-256, 600,000 rounds; AES-256-GCM) with its SHA-256 fingerprint; the app never stores it | Unit and browser tests: round trip, wrong passphrase, changed file, nothing readable in the sealed file |
+| Voices in videos | Optional voice change (pitch and formants lowered by a random, drifting factor; stops casual listeners, can be partly undone by someone who tries) or sound removal (the safe choice) | Pitch measured in the output in a browser test; if the browser cannot encode audio, the user chooses instead of a silent fallback |
+| Needing to prove later which original a shared copy came from | Optional sealed original: the untouched file, encrypted with a passphrase (normalised for Persian/Arabic keyboards; PBKDF2-SHA-256, 600,000 rounds; AES-256-GCM). A keyed "seal code" (HMAC with a secret inside the sealed file) can be noted or published without linking anyone's copy of the original to it. It proves the file is unchanged since sealing, not that it was never edited before; the seal time is the device clock. The passphrase field is not offered to password managers; the app never stores the original | Unit and browser tests: round trip, wrong passphrase, changed file, nothing readable in the sealed file |
 | Camera sensor fingerprint (PRNU) | Optional: smaller, slightly turned and trimmed picture with fresh grain | Makes matching much harder; **not** a guarantee |
 | File names that reveal date/time | Output names are random | — |
 | Covering silently failing | If detection or video covering fails, nothing is offered until the user covers by hand or explicitly continues | Browser tests block the models and check that no copy is offered |
@@ -44,8 +44,8 @@ logging off where possible. Opening Pakkon and choosing files inside it never ha
 - It cannot hide what is visible: signs it did not find, landmarks, shadows, reflections, clothes, tattoos, voices.
 - Detection is not perfect. The app always asks the user to check the picture and the whole video.
 - It cannot remove copies already sent, or data a messenger or cloud service adds afterwards.
-- A changed voice is much harder to recognise by ear, but not impossible to analyse; words, accent and background
-  sounds stay.
+- A changed voice is harder to recognise for an ordinary listener, but it can be partly undone by someone who tries;
+  words, accent and background sounds stay. When a voice must not be recognised, remove the sound.
 - It is a web app: its safety also depends on the browser and the device being trustworthy.
 
 ## Reporting a problem

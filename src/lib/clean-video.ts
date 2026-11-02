@@ -42,6 +42,7 @@ export async function soundConversion(opts: SoundOptions): Promise<{ audio?: Con
   const codec = (await canEncodeAudio('aac').catch(() => false)) ? 'aac' : (await canEncodeAudio('opus').catch(() => false)) ? 'opus' : null;
   if (!codec) throw new VideoCleanError('cannotVoice', 'no AAC or Opus encoder');
   const ratio = randomVoiceRatio(cryptoRand);
+  const drift = { period: 3 + 4 * cryptoRand(), phase: 2 * Math.PI * cryptoRand() };
   let shifter: PitchShifter | undefined;
   return {
     audio: {
@@ -51,6 +52,8 @@ export async function soundConversion(opts: SoundOptions): Promise<{ audio?: Con
         const channels = sample.numberOfChannels;
         const frames = sample.numberOfFrames;
         shifter ??= new PitchShifter(ratio, sample.sampleRate, channels);
+        // The factor wanders slowly (+/-0.04 over a few seconds), so no single factor undoes it exactly.
+        shifter.ratio = ratio + 0.04 * Math.sin((2 * Math.PI * sample.timestamp) / drift.period + drift.phase);
         const planes: Float32Array[] = [];
         for (let c = 0; c < channels; c++) {
           const plane = new Float32Array(frames);
@@ -70,6 +73,8 @@ export interface CleanVideoResult {
   bytes: Uint8Array;
   /** Tracks of the input that were left out (data tracks such as GPS, subtitles, timecode). */
   droppedTracks: number;
+  /** Whether the new video has sound. */
+  audioKept: boolean;
 }
 
 /**
@@ -125,7 +130,11 @@ export async function cleanVideo(
     const buffer = target.buffer;
     if (!buffer) throw new VideoCleanError('failed', 'no output');
     const bytes = await finishVideo(new Uint8Array(buffer));
-    return { bytes, droppedTracks: Math.max(0, before.tracks.length - conversion.utilizedTracks.length) };
+    return {
+      bytes,
+      droppedTracks: Math.max(0, before.tracks.length - conversion.utilizedTracks.length),
+      audioKept: conversion.utilizedTracks.some((t) => t.isAudioTrack()),
+    };
   } finally {
     input.dispose();
   }

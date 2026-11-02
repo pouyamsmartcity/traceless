@@ -116,12 +116,13 @@ def make_webp():
 
 
 def make_edited():
-    """A photo that carries typical signs of editing: an editor's name, a later modify date and a
-    thumbnail with a different shape (the picture was cropped after the thumbnail was made)."""
+    """A photo that carries typical signs of editing: an editor's name, a later modify date, and a picture that
+    was cropped after the thumbnail was made (the thumbnail still shows the whole scene)."""
     path = os.path.join(OUT, 'photo-edited.jpg')
-    scene(800, 600, (210, 190, 170)).save(path, quality=90)
-    thumb = os.path.join(OUT, '_thumb_square.jpg')
-    scene(160, 160, (210, 190, 170)).save(thumb, quality=80)
+    whole = scene(1600, 1200, (210, 190, 170))
+    whole.crop((800, 300, 1600, 900)).save(path, quality=90)
+    thumb = os.path.join(OUT, '_thumb_whole.jpg')
+    whole.resize((160, 120)).save(thumb, quality=80)
     run([EXIFTOOL, '-q', '-overwrite_original', '-Make=FakePhone Co', '-Model=FakePhone 15 Pro',
          '-DateTimeOriginal=2026:09:21 18:30:00', '-ModifyDate=2026:10:02 09:15:00',
          '-Software=Adobe Photoshop 27.0 (Windows)', f'-ThumbnailImage<={thumb}', path])
@@ -139,6 +140,30 @@ def make_honest():
          '-DateTimeOriginal=2026:09:21 18:30:00', '-ModifyDate=2026:09:21 18:30:00', '-Software=FakeCam 3.1',
          f'-ThumbnailImage<={thumb}', path])
     os.remove(thumb)
+    # Wide (16:9) photos whose 4:3 thumbnail has black bars, or is centre-cropped, as cameras make them,
+    # and a mirrored photo (orientation 2): none of them may raise an edit hint.
+    wide = scene(1280, 720, (100, 180, 120))
+    for name, make_thumb, extra in (
+        ('photo-honest-wide-bars.jpg', lambda im: letterbox(im, 160, 120), []),
+        ('photo-honest-wide-crop.jpg', lambda im: im.crop((160, 0, 1120, 720)).resize((160, 120)), []),
+        ('photo-honest-mirrored.jpg', lambda im: im.resize((160, 90)), ['-Orientation#=2']),
+    ):
+        path = os.path.join(OUT, name)
+        wide.save(path, quality=90)
+        thumb = os.path.join(OUT, '_thumb_wide.jpg')
+        make_thumb(wide).save(thumb, quality=80)
+        run([EXIFTOOL, '-q', '-overwrite_original', '-Make=FakePhone Co', '-Model=FakePhone 15 Pro',
+             '-DateTimeOriginal=2026:09:21 18:30:00', *extra, f'-ThumbnailImage<={thumb}', path])
+        os.remove(thumb)
+
+
+def letterbox(im, w, h):
+    """Fits `im` into w x h with black bars."""
+    r = min(w / im.width, h / im.height)
+    small = im.resize((round(im.width * r), round(im.height * r)))
+    out = Image.new('RGB', (w, h), (0, 0, 0))
+    out.paste(small, ((w - small.width) // 2, (h - small.height) // 2))
+    return out
 
 
 def make_videos():

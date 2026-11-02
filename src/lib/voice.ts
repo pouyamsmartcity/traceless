@@ -1,9 +1,9 @@
 /**
  * Voice change for videos: a streaming pitch shifter (two crossfaded read heads on a delay line).
  * Pitch and the voice's formants move together, which changes how a voice sounds more than a pitch
- * change alone, while speech stays understandable. The factor is random per video, so it is not known
- * to someone trying to undo it. It makes a voice much harder to recognise by ear; it is not a guarantee
- * against expert voice analysis.
+ * change alone, while speech stays understandable. The factor is random per video and drifts slowly over
+ * time. This makes a voice harder to recognise by ear, but someone who tries can shift it back roughly:
+ * it is not protection against a determined listener. Removing the sound is the safe choice.
  *
  * Kept free of browser APIs so it can be unit-tested in Node.
  */
@@ -15,9 +15,9 @@ export class PitchShifter {
   private write = 0;
   private phase = 0;
 
-  /** `ratio` < 1 lowers the voice, > 1 raises it. */
+  /** `ratio` < 1 lowers the voice, > 1 raises it. It may be changed between blocks. */
   constructor(
-    readonly ratio: number,
+    public ratio: number,
     sampleRate: number,
     channels: number,
   ) {
