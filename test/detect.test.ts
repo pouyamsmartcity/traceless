@@ -114,3 +114,37 @@ describe('detector planning', () => {
     expect(merged[0]!.x).toBeLessThan(100);
   });
 });
+
+describe('text detection maths', () => {
+  it('finds separate text regions in a probability map and grows them', async () => {
+    const { decodeTextMap } = await import('../src/lib/detect/models');
+    const w = 40;
+    const h = 20;
+    const map = new Float32Array(w * h);
+    const fill = (x1: number, y1: number, x2: number, y2: number, v: number) => {
+      for (let y = y1; y < y2; y++) for (let x = x1; x < x2; x++) map[y * w + x] = v;
+    };
+    fill(2, 2, 12, 6, 0.9); // a word
+    fill(20, 10, 36, 14, 0.9); // another word
+    fill(30, 2, 34, 4, 0.25); // faint blob: above pixel threshold, below box threshold
+    map[0] = 0.9; // single noisy pixel
+    const boxes = decodeTextMap(map, w, h, 0.2, 0.5);
+    expect(boxes).toHaveLength(2);
+    const [a, b] = boxes.sort((p, q) => p.x1 - q.x1);
+    expect(a!.x1).toBeLessThan(2);
+    expect(a!.x2).toBeGreaterThan(12);
+    expect(b!.y1).toBeLessThan(10);
+    expect(b!.y2).toBeGreaterThan(14);
+  });
+
+  it('enlarges small pictures and splits very large ones', async () => {
+    const { planTextPasses } = await import('../src/lib/detect/detector');
+    const small = planTextPasses(700, 524);
+    expect(small).toHaveLength(1);
+    expect(small[0]!.inW % 32).toBe(0);
+    expect(small[0]!.inW).toBeGreaterThanOrEqual(1024);
+    const big = planTextPasses(4000, 3000);
+    expect(big).toHaveLength(5);
+    for (const p of big) expect(Math.max(p.inW, p.inH)).toBeLessThanOrEqual(1920);
+  });
+});

@@ -4,14 +4,14 @@ import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon } from './dom';
 import { openEditor } from './editor';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
-import { newItem, processItem, renderImage, type Item, type Options } from './pipeline';
+import { ensureText, newItem, processItem, renderImage, type Item, type Options } from './pipeline';
 
 interface Settings extends Options {
   lang: Lang;
 }
 
 function loadSettings(): Settings {
-  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false };
+  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false };
   try {
     const raw = localStorage.getItem('pakkon-settings');
     if (raw) {
@@ -21,6 +21,7 @@ function loadSettings(): Settings {
         faces: s.faces !== false,
         plates: s.plates !== false,
         extra: s.extra === true,
+        text: s.text === true,
       };
     }
   } catch {
@@ -116,7 +117,7 @@ export class App {
       input.value = '';
     });
 
-    const toggle = (key: 'faces' | 'plates' | 'extra', label: string) => {
+    const toggle = (key: 'faces' | 'plates' | 'text' | 'extra', label: string) => {
       const box = h('input', { type: 'checkbox', checked: this.settings[key], 'data-testid': `opt-${key}` });
       box.addEventListener('change', () => {
         this.settings[key] = box.checked;
@@ -159,7 +160,7 @@ export class App {
       { className: 'picker' },
       h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
       h('p', { className: 'hint' }, t.pickHint),
-      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('extra', t.optExtra)),
+      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('text', t.optText), toggle('extra', t.optExtra)),
       h('p', { className: 'hint' }, t.extraHint),
     );
     this.bindDrop(dropZone);
@@ -226,9 +227,14 @@ export class App {
   }
 
   private async rerender(item: Item): Promise<void> {
-    item.status = 'cleaning';
-    this.updateCard(item);
     try {
+      if (this.settings.text && !item.textDetected) {
+        item.status = 'detecting';
+        this.updateCard(item);
+        await ensureText(item, this.detector);
+      }
+      item.status = 'cleaning';
+      this.updateCard(item);
       await renderImage(item, this.settings);
       item.status = 'ready';
     } catch (e) {
@@ -307,7 +313,8 @@ export class App {
       if (item.media === 'image') {
         const faces = item.detections.filter((d, i) => d.kind === 'face' && this.settings.faces && !item.removed.has(i)).length;
         const plates = item.detections.filter((d, i) => d.kind === 'plate' && this.settings.plates && !item.removed.has(i)).length;
-        body.appendChild(h('p', { className: 'masks', 'data-testid': 'mask-summary' }, t.masksSummary(faces, plates, item.manual.length)));
+        const texts = this.settings.text ? item.detections.filter((d, i) => d.kind === 'text' && !item.removed.has(i)).length : undefined;
+        body.appendChild(h('p', { className: 'masks', 'data-testid': 'mask-summary' }, t.masksSummary(faces, plates, item.manual.length, texts)));
         if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
         if (this.settings.extra) body.appendChild(h('p', { className: 'note', 'data-testid': 'extra-note' }, t.extraApplied));
         body.appendChild(h('p', { className: 'note' }, t.checkPicture));

@@ -243,6 +243,24 @@ test.describe('Pakkon', () => {
     await expect(item.getByTestId('checklist')).toContainText('سایه');
   });
 
+  test('covers text when asked, and a cover can be removed with one tap', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-text').check();
+    await addFile(page, fixture('real/iran-truck.png'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('mask-summary')).toContainText('نوشته');
+    // The camera's date stamp in the top-right corner (reference box x 560-688, y 15-33) is covered.
+    expect((await regionColor(page, { x: 575, y: 19, w: 100, h: 10 })).max).toBeLessThan(8);
+    // Tap the date-stamp cover in the editor to uncover it again.
+    await page.getByTestId('edit').click();
+    const canvas = page.locator('.editor-canvas');
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.click(box.x + (620 / 700) * box.width, box.y + (24 / 524) * box.height);
+    await page.getByTestId('editor-done').click();
+    await readyItem(page);
+    expect((await regionColor(page, { x: 575, y: 19, w: 100, h: 10 })).max).toBeGreaterThan(100);
+  });
+
   test('a cover can be drawn by hand', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('leaky/screenshot-leaky.png'));

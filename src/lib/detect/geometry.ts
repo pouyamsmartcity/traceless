@@ -8,7 +8,7 @@ export interface Rect {
 
 export interface Detection extends Rect {
   score: number;
-  kind: 'face' | 'plate';
+  kind: 'face' | 'plate' | 'text';
 }
 
 export function iou(a: Rect, b: Rect): number {

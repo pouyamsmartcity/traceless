@@ -1,5 +1,5 @@
 import { expand, letterbox, nms, tiles, unletterbox, type Detection, type Letterbox, type Rect } from './geometry';
-import { MODELS, toTensor, type ModelId, type RawBox } from './models';
+import { MODELS, toTensor, toTensorWH, type ModelId, type PixelFormat, type RawBox } from './models';
 import type { WorkerRequest, WorkerResponse } from './worker';
 
 /** Longest side (pixels) of the picture the detectors look at. Larger photos are scaled down for detection only. */
@@ -118,7 +118,7 @@ export class Detector {
     else p.resolve(value);
   }
 
-  private async infer(model: ModelId, tensor: Float32Array): Promise<RawBox[]> {
+  private async infer(model: ModelId, tensor: Float32Array, width: number, height: number): Promise<RawBox[]> {
     await this.start();
     const id = this.nextId++;
     return new Promise<RawBox[]>((resolve, reject) => {
@@ -140,7 +140,7 @@ export class Detector {
           reject(e);
         },
       });
-      this.worker!.postMessage({ type: 'run', id, model, tensor } satisfies WorkerRequest, [tensor.buffer]);
+      this.worker!.postMessage({ type: 'run', id, model, tensor, width, height } satisfies WorkerRequest, [tensor.buffer]);
     });
   }
 
@@ -150,7 +150,7 @@ export class Detector {
   }
 
   /** `srcScale` maps source-image pixels to pixels of `source` (which may be a pre-shrunk copy). */
-  private prepare(source: CanvasImageSource, srcScale: number, lb: Letterbox, pad: number, pixels: 'bgr255' | 'rgb01'): Float32Array {
+  private prepare(source: CanvasImageSource, srcScale: number, lb: Letterbox, pad: number, pixels: PixelFormat): Float32Array {
     const size = lb.size;
     if (!this.canvas) {
       this.canvas = document.createElement('canvas');
@@ -203,7 +203,7 @@ export class Detector {
         const spec = MODELS[pass.model];
         const lb = letterbox(pass.region, spec.size);
         const tensor = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels);
-        const boxes = await this.infer(pass.model, tensor);
+        const boxes = await this.infer(pass.model, tensor, spec.size, spec.size);
         for (const b of boxes) found.push({ model: pass.model, box: unletterbox(b, lb), score: b.score });
         opts.onProgress?.(++done / passes.length);
       }
@@ -215,4 +215,60 @@ export class Detector {
     }
     return mergeDetections(found, w, h);
   }
+
+  /**
+   * Finds text (signs, names, numbers). The picture is enlarged 1.5x (up to 1920 px) because small
+   * text is common; very large photos are also scanned in four overlapping parts.
+   */
+  async detectText(source: CanvasImageSource, w: number, h: number, onProgress?: (fraction: number) => void): Promise<Detection[]> {
+    const passes = planTextPasses(w, h);
+    const found: Detection[] = [];
+    const canvas = document.createElement('canvas');
+    try {
+      let done = 0;
+      for (const p of passes) {
+        canvas.width = p.inW;
+        canvas.height = p.inH;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) throw new Error('canvas unavailable');
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(source, p.region.x, p.region.y, p.region.w, p.region.h, 0, 0, p.inW, p.inH);
+        const tensor = toTensorWH(ctx.getImageData(0, 0, p.inW, p.inH).data, p.inW, p.inH, MODELS.text.pixels);
+        const boxes = await this.infer('text', tensor, p.inW, p.inH);
+        const fx = p.region.w / p.inW;
+        const fy = p.region.h / p.inH;
+        for (const b of boxes) {
+          const r = { x: p.region.x + b.x1 * fx, y: p.region.y + b.y1 * fy, w: (b.x2 - b.x1) * fx, h: (b.y2 - b.y1) * fy };
+          const grown = expand(r, 0.05, 0.1, w, h);
+          if (grown.w > 1 && grown.h > 1) found.push({ ...grown, score: b.score, kind: 'text' });
+        }
+        onProgress?.(++done / passes.length);
+      }
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    return nms(found, 0.5);
+  }
+}
+
+/** Longest side of the text model's input. */
+const TEXT_MAX_SIDE = 1920;
+
+const round32 = (v: number) => Math.max(32, Math.round(v / 32) * 32);
+
+/** Plans the regions the text model looks at, and the input size for each. Exported for tests. */
+export function planTextPasses(w: number, h: number): { region: Rect; inW: number; inH: number }[] {
+  const plan = (region: Rect) => {
+    const long = Math.max(region.w, region.h);
+    const target = Math.min(TEXT_MAX_SIDE, Math.max(960, 1.5 * long));
+    const s = target / long;
+    return { region, inW: round32(region.w * s), inH: round32(region.h * s) };
+  };
+  const passes = [plan({ x: 0, y: 0, w, h })];
+  if (Math.max(w, h) > 2400) {
+    const tile = Math.ceil(Math.max(w, h) * 0.55);
+    for (const t of tiles(w, h, tile, 0.1)) passes.push(plan(t));
+  }
+  return passes;
 }

@@ -10,13 +10,20 @@ which device a picture was taken, and covers faces and licence plates with solid
 - **Rebuilt from pixels.** Photos are redrawn into a brand-new file. Location, phone model, serial numbers, owner
   name, dates, hidden thumbnails, edit history, Content Credentials (C2PA), Motion Photo videos and leftovers of
   cropped screenshots stay behind. The new file is checked again before you get it.
-- **Faces and plates covered.** On-device detection finds faces (also small faces in crowds) and licence plates,
-  including Iranian plates. Covers are solid fills, because blur and pixelation can sometimes be reversed. You can add
-  or remove covers by hand.
+- **Faces and plates covered, in photos and videos.** On-device detection finds faces (also small faces in crowds)
+  and licence plates, including Iranian plates. Covers are solid fills, because blur and pixelation can sometimes be
+  reversed. You can add or remove covers by hand. In videos, every frame is covered, following moving people.
+- **Text covered on request.** Street and shop signs, names and numbers (Persian and Latin script) can be covered
+  too; tap a cover to keep a piece of text visible.
+- **Extra protection on request.** Makes it much harder to link a photo to a camera through its sensor's noise
+  pattern (smaller, very slightly turned and trimmed picture, fresh grain).
+- **A checklist before sending** for what software cannot judge: reflections, signs, tattoos, shadows, voices.
 - **"What did this file reveal?"** Before cleaning, Pakkon lists in plain words what the file was giving away, and
   shows the nearest town for a GPS location (from an offline list).
-- **Videos.** Re-packaged into a fresh MP4 with only picture and sound; location, device tags, dates and extra data
-  tracks (such as GPS tracks) are dropped. The picture and sound are copied without quality loss.
+- **Videos.** Rebuilt into a fresh MP4 with only picture and sound; location, device tags, dates and extra data
+  tracks (such as GPS tracks) are dropped. With covering on, the picture is re-encoded with covers on every frame;
+  with covering off, picture and sound are copied without quality loss. Devices that cannot re-encode video still get
+  the hidden data removed, with a clear warning that faces were not covered.
 - **Persian first**, English too. Random output file names. Installable on Android, iPhone and desktop; on Android
   you can share photos straight into Pakkon from the gallery.
 
@@ -28,9 +35,11 @@ Pakkon never claims a file is "100% safe". It does not hide:
 - faces or plates the detector missed, so always look at the picture before sending. On 40 crowd photos from the
   WIDER FACE set it covered 97% of faces 40 px or larger, 92% of faces 20-40 px, and about half of tiny faces under
   20 px;
-- the camera sensor's noise pattern (PRNU), which can link photos to the same camera;
-- faces, plates and voices **in videos** (only hidden data is removed from videos in this version);
-- data inside the compressed video stream itself (for example encoder settings).
+- the camera sensor's noise pattern (PRNU), which can link photos to the same camera ("extra protection" makes this
+  much harder, not impossible);
+- **voices** and background sounds in videos;
+- faces in videos on devices that cannot re-encode video (the app says so), and text in videos;
+- data inside the compressed video stream when covering is off (for example encoder settings).
 
 ## Supported files
 

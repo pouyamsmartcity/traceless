@@ -1,7 +1,7 @@
 import type { Rect } from '../lib/detect/geometry';
 import { ICONS, h, icon } from './dom';
 import type { Strings } from './i18n';
-import type { Item, Options } from './pipeline';
+import { kindEnabled, type Item, type Options } from './pipeline';
 
 /**
  * Full-screen editor to add masks by dragging and to remove or restore masks by tapping.
@@ -34,7 +34,7 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
 
   const autoEnabled = (i: number) => {
     const d = item.detections[i]!;
-    return (d.kind === 'face' && opts.faces) || (d.kind === 'plate' && opts.plates);
+    return kindEnabled(d.kind, opts);
   };
 
   function layout(): void {

@@ -5,11 +5,11 @@
  * runtime are loaded from this site's own files (and the page's CSP forbids anything else).
  */
 import * as ort from 'onnxruntime-web/wasm';
-import { MODELS, decodePlates, decodeYunet, type ModelId, type RawBox } from './models';
+import { MODELS, TEXT_PIXEL_THRESHOLD, decodePlates, decodeTextMap, decodeYunet, type ModelId, type RawBox } from './models';
 
 export type WorkerRequest =
   | { type: 'init'; base: string }
-  | { type: 'run'; id: number; model: ModelId; tensor: Float32Array };
+  | { type: 'run'; id: number; model: ModelId; tensor: Float32Array; width: number; height: number };
 
 export type WorkerResponse =
   | { type: 'ready' }
@@ -33,10 +33,10 @@ function session(model: ModelId): Promise<ort.InferenceSession> {
   return s;
 }
 
-async function run(model: ModelId, tensor: Float32Array): Promise<RawBox[]> {
+async function run(model: ModelId, tensor: Float32Array, width: number, height: number): Promise<RawBox[]> {
   const spec = MODELS[model];
   const s = await session(model);
-  const input = new ort.Tensor('float32', tensor, [1, 3, spec.size, spec.size]);
+  const input = new ort.Tensor('float32', tensor, [1, 3, height, width]);
   const results = await s.run({ [spec.inputName]: input });
   try {
     if (model === 'face') {
@@ -45,7 +45,8 @@ async function run(model: ModelId, tensor: Float32Array): Promise<RawBox[]> {
       return decodeYunet(out, spec.size, spec.threshold);
     }
     const first = results[s.outputNames[0]!];
-    if (!first) throw new Error('plate model returned nothing');
+    if (!first) throw new Error(`${model} model returned nothing`);
+    if (model === 'text') return decodeTextMap(first.data as Float32Array, width, height, TEXT_PIXEL_THRESHOLD, spec.threshold);
     return decodePlates(first.data as Float32Array, spec.threshold);
   } finally {
     input.dispose();
@@ -70,11 +71,12 @@ if (!isRuntimeThread) scope.onmessage = async (e: MessageEvent<WorkerRequest>) =
     ort.env.logLevel = 'error';
     scope.postMessage({ type: 'ready' } satisfies WorkerResponse);
     // Start loading both models now; the first photo then does not wait for them.
+    // (The text model is loaded only when text covering is first used.)
     for (const m of ['face', 'plate'] as const) session(m).catch(() => undefined);
     return;
   }
   try {
-    const boxes = await run(msg.model, msg.tensor);
+    const boxes = await run(msg.model, msg.tensor, msg.width, msg.height);
     scope.postMessage({ type: 'result', id: msg.id, boxes } satisfies WorkerResponse);
   } catch (err) {
     scope.postMessage({ type: 'error', id: msg.id, message: err instanceof Error ? err.message : String(err) } satisfies WorkerResponse);

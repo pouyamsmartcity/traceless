@@ -26,7 +26,15 @@ English. Target users: journalists, activists and ordinary people who share imag
 5. "What did your photo reveal?" list in plain words, with the nearest town for GPS (offline GeoNames list).
 6. Offline installable web app, Android share target, random output file names, Persian and English.
 
-Not in v0.1: face/plate masking inside videos, voice change, HEIC decoding where the browser cannot open HEIC.
+Added after the first pass (all tested):
+7. Face and plate masking in video: frames sampled 3 times a second, masks interpolated for moving people and
+   held across one missed detection, picture re-encoded as H.264, sound copied.
+8. Optional text covering (signs, names, numbers; PaddleOCR detection, Apache-2.0), tap to uncover.
+9. Optional extra protection against sensor-pattern (PRNU) matching: downscale, small random turn and trim, grain.
+10. Pre-send checklist; error details for reports; shared originals wiped from storage; updates download only
+    changed files.
+
+Not yet: voice change, text covering in video, HEIC decoding where the browser cannot open HEIC.
 
 ## Stack (decided)
 - Web app (TypeScript, Vite), no framework, runs fully in the browser; installable (service worker, manifest).
@@ -42,7 +50,7 @@ takes about 3-5 seconds on a mid-range computer; older phones are slower. iPhone
 detector (no WebAssembly SIMD); cleaning still works and the user is asked to cover faces by hand.
 
 ## Later ideas
-Counting people in a crowd photo for reporting (needs a crowd-density model; a face count is already shown, which is
+Voice change in video; counting people in a crowd photo for reporting (needs a crowd-density model; a face count is already shown, which is
 only a lower bound); face and plate masking in video; Text/sign detection; "everyone except this person"; screenshot mode (status bar, chat names and avatars); voice
 change in video; pre-save checklist (skyline, shadows, reflections); messenger "send as file" warning; optional
 sensor-fingerprint weakening; single-file offline HTML that can be passed around during internet shutdowns;

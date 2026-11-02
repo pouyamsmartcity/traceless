@@ -25,6 +25,8 @@ export interface Item {
   removed: Set<number>;
   manual: Rect[];
   detectFailed: boolean;
+  /** Text detection has run for this photo. */
+  textDetected: boolean;
   droppedTracks: number;
   /** Video: what happened to faces and plates. */
   videoMasks?: 'covered' | 'off' | 'unavailable';
@@ -43,6 +45,8 @@ export interface Options {
   plates: boolean;
   /** Weaken the camera sensor pattern in photos. */
   extra: boolean;
+  /** Cover text in photos (signs, names, numbers). */
+  text: boolean;
 }
 
 let nextId = 1;
@@ -67,6 +71,7 @@ export function newItem(file: File): Item {
     removed: new Set(),
     manual: [],
     detectFailed: false,
+    textDetected: false,
     droppedTracks: 0,
   };
 }
@@ -78,10 +83,27 @@ export function randomName(ext: string): string {
   return `img-${Array.from(a, (b) => (b % 36).toString(36)).join('')}.${ext}`;
 }
 
+export function kindEnabled(kind: Detection['kind'], opts: Options): boolean {
+  return kind === 'face' ? opts.faces : kind === 'plate' ? opts.plates : opts.text;
+}
+
+/** Runs text detection once for a photo (it is only needed when text covering is switched on). */
+export async function ensureText(item: Item, detector: Detector, onProgress?: (f: number) => void): Promise<void> {
+  if (item.textDetected || !item.decoded) return;
+  try {
+    const found = await detector.detectText(item.decoded.element, item.decoded.width, item.decoded.height, onProgress);
+    item.detections.push(...found);
+  } catch (e) {
+    console.error('text detection failed', e);
+    item.detectFailed = true;
+  }
+  item.textDetected = true;
+}
+
 /** The masks that will be painted: auto detections the user kept and enabled, plus hand-drawn ones. */
 export function activeMasks(item: Item, opts: Options): Rect[] {
   const auto = item.detections.filter(
-    (d, i) => !item.removed.has(i) && ((d.kind === 'face' && opts.faces) || (d.kind === 'plate' && opts.plates)),
+    (d, i) => !item.removed.has(i) && kindEnabled(d.kind, opts),
   );
   return [...auto, ...item.manual];
 }
@@ -185,6 +207,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
         console.error('detection failed', e);
         item.detectFailed = true;
       }
+      if (opts.text) await ensureText(item, detector, (p) => set('detecting', p));
       set('cleaning');
       await renderImage(item, opts);
     }
