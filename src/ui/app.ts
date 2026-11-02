@@ -79,7 +79,9 @@ export class App {
     // Prepare the detectors in the background so the first photo is quick.
     const idle = (cb: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(cb, { timeout: 3000 }) : setTimeout(cb, 1500));
     idle(() => {
-      this.detector.warmUp();
+      // On the very first visit the offline worker is still storing the models: loading them here as well
+      // would download them twice (slow and costly on a weak connection), so wait until it is done.
+      if (!this.waitsForOfflineCopy()) this.detector.warmUp();
       loadPlaces(this.base)
         .then((p) => {
           this.places = p;
@@ -92,6 +94,24 @@ export class App {
   setOfflineReady(): void {
     this.offlineReady = true;
     this.render();
+    // Now the models come from the stored copy (once this page is served by the worker).
+    const sw = 'serviceWorker' in navigator ? navigator.serviceWorker : undefined;
+    if (!sw || sw.controller) this.detector.warmUp();
+    else {
+      const go = () => this.detector.warmUp();
+      sw.addEventListener('controllerchange', go, { once: true });
+      setTimeout(go, 10_000);
+    }
+  }
+
+  /** The offline copy could not be made (private browsing, old browser): load the models straight away. */
+  setOfflineUnavailable(): void {
+    this.detector.warmUp();
+  }
+
+  /** True while the offline worker is being installed for the first time (this page is not served by it yet). */
+  private waitsForOfflineCopy(): boolean {
+    return import.meta.env.PROD && 'serviceWorker' in navigator && !navigator.serviceWorker.controller && !this.offlineReady;
   }
 
   /** Adds files from the picker, drag and drop, paste or the system share sheet. */

@@ -5,19 +5,25 @@ const PRECACHE = __FILES__;
 const CACHE = `pakkon-${VERSION}`;
 
 /** Stores every app file. Files that did not change since the last version are copied from the old
- * cache instead of downloaded again (helps on slow or expensive connections). */
+ * cache instead of downloaded again (helps on slow or expensive connections). Files are stored one by one,
+ * so when the connection drops during the first visit, what was already downloaded is kept and the next
+ * try only fetches the rest. */
 async function precache() {
   const cache = await caches.open(CACHE);
   const old = (await caches.keys()).filter((k) => k.startsWith('pakkon-') && k !== CACHE && k !== 'pakkon-shared');
-  const missing = [];
-  for (const url of PRECACHE) {
-    // Every entry ends in ?v=<content fingerprint>: an exact match in an old cache is the same file.
-    let hit;
-    for (const name of old) if ((hit = await (await caches.open(name)).match(url))) break;
-    if (hit) await cache.put(url, hit);
-    else missing.push(url);
+  const queue = [...PRECACHE];
+  async function next() {
+    for (let url; (url = queue.shift()) !== undefined; ) {
+      // Every entry ends in ?v=<content fingerprint>: an exact match is the same file.
+      if (await cache.match(url)) continue; // kept from an earlier, interrupted try
+      let hit;
+      for (const name of old) if ((hit = await (await caches.open(name)).match(url))) break;
+      if (hit) await cache.put(url, hit);
+      else await cache.add(url);
+    }
   }
-  await cache.addAll(missing);
+  // A few downloads at a time; any failure fails the install, which the browser retries on a later visit.
+  await Promise.all([next(), next(), next(), next()]);
 }
 
 self.addEventListener('install', (event) => {

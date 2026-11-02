@@ -707,6 +707,47 @@ test.describe('Pakkon', () => {
     await context.setOffline(false);
   });
 
+  test('a first visit cut off half-way keeps what it downloaded and only fetches the rest next time', async ({ page, context }) => {
+    test.skip(test.info().project.name !== 'desktop', 'one browser is enough');
+    // The connection "drops" while the plate model downloads.
+    await context.route('**/models/plate-*', (route) => route.abort('internetdisconnected'));
+    await page.goto('/');
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            // The failed install leaves no worker behind (the browser drops the registration).
+            const reg = await navigator.serviceWorker.getRegistration();
+            if (reg?.installing || reg?.waiting || reg?.active) return -1;
+            const names = (await caches.keys()).filter((k) => k.startsWith('pakkon-'));
+            let n = 0;
+            for (const k of names) n += (await (await caches.open(k)).keys()).length;
+            return n;
+          }),
+        { timeout: 90_000 },
+      )
+      .toBeGreaterThan(5);
+    await expect(page.getByTestId('offline-badge')).not.toContainText('آمادهٔ کار بدون اینترنت');
+    // Back online: only files not stored yet are downloaded.
+    await context.unrouteAll();
+    const fetched: string[] = [];
+    const byPage: string[] = [];
+    await context.route('**/*', (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (route.request().serviceWorker()) fetched.push(path);
+      else if (path.includes('/models/') || path.endsWith('.wasm')) byPage.push(path);
+      return route.continue();
+    });
+    await page.reload();
+    await expect(page.getByTestId('offline-badge')).toContainText('آمادهٔ کار بدون اینترنت', { timeout: 90_000 });
+    expect(fetched.some((p) => p.includes('/models/plate-'))).toBe(true);
+    expect(fetched.filter((p) => p.endsWith('.wasm') || p.includes('/models/face-'))).toEqual([]);
+    // The page waits for the stored copy instead of downloading the models a second time.
+    await addFile(page, fixture('real/astronaut.png'));
+    await expect((await readyItem(page)).getByTestId('mask-summary')).toContainText('۱ صورت');
+    expect(byPage).toEqual([]);
+  });
+
   test('switches to English', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'English' }).click();

@@ -46,7 +46,10 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     .register('./sw.js', { scope: './' })
     .then(() => navigator.serviceWorker.ready)
     .then(() => app.setOfflineReady())
-    .catch((e: unknown) => console.warn('offline mode unavailable', e));
+    .catch((e: unknown) => {
+      console.warn('offline mode unavailable', e);
+      app.setOfflineUnavailable();
+    });
 }
 
 takeSharedFiles().catch((e: unknown) => console.error('could not read shared files', e));
