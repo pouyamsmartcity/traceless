@@ -416,6 +416,27 @@ export class App {
       preview = h('div', { className: 'preview placeholder' }, item.status === 'error' ? icon(ICONS.alert, 32) : h('div', { className: 'spinner' }));
     }
     card.appendChild(preview);
+    // Hold to see the original in place of the safe copy (only on this screen; it is never shared).
+    if (item.status === 'ready' && item.output && item.media === 'image' && item.decoded && preview instanceof HTMLImageElement) {
+      const img = preview;
+      const safeUrl = item.output.url;
+      const origUrl = item.decoded.url;
+      const compare = h('button', { type: 'button', className: 'btn small compare', 'data-testid': 'compare' }, t.holdToCompare);
+      const show = (orig: boolean) => {
+        img.src = orig ? origUrl : safeUrl;
+        compare.classList.toggle('active', orig);
+      };
+      compare.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        show(true);
+      });
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) compare.addEventListener(ev, () => show(false));
+      compare.addEventListener('keydown', (e) => {
+        if (e.key === ' ' || e.key === 'Enter') show(true);
+      });
+      compare.addEventListener('keyup', () => show(false));
+      card.appendChild(h('div', { className: 'compare-row' }, compare));
+    }
 
     const body = h('div', { className: 'card-body' });
     card.appendChild(body);

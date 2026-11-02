@@ -439,6 +439,22 @@ test.describe('Pakkon', () => {
     expect((await regionColor(page, { x: 440, y: 60, w: 40, h: 40 })).max).toBeGreaterThan(60);
   });
 
+  test('holding "compare" shows the original, releasing shows the safe copy again', async ({ page }) => {
+    await page.goto('/');
+    await addFile(page, fixture('real/astronaut.png'));
+    const item = await readyItem(page);
+    const img = item.getByTestId('output-image');
+    const safeSrc = await img.getAttribute('src');
+    const button = item.getByTestId('compare');
+    await button.hover();
+    await page.mouse.down();
+    await expect(img).not.toHaveAttribute('src', safeSrc!);
+    await page.mouse.up();
+    await expect(img).toHaveAttribute('src', safeSrc!);
+    // The save link always points at the safe copy.
+    await expect(item.getByTestId('save')).toHaveAttribute('href', safeSrc!);
+  });
+
   test('a cover can be drawn by hand', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('leaky/screenshot-leaky.png'));
