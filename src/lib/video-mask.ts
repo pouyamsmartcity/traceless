@@ -8,6 +8,7 @@ import {
   Mp4OutputFormat,
   Output,
   QUALITY_HIGH,
+  QUALITY_MEDIUM,
   canEncodeVideo,
   type VideoSample,
 } from 'mediabunny';
@@ -21,6 +22,8 @@ import { VideoCleanError } from './video-errors';
 
 /** How often to look for faces, in seconds. Masks between samples are interpolated (see video-timeline). */
 const SAMPLE_STEP = 1 / 3;
+/** Above this length (seconds) the re-encoded video uses medium instead of high quality. */
+const LONG_VIDEO_SECONDS = 180;
 /** Longest side of the frames the detectors look at. */
 const DETECT_SIDE = 1280;
 
@@ -109,7 +112,8 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       showWarnings: false,
       video: {
         codec: 'avc',
-        quality: QUALITY_HIGH,
+        // The new video is built in memory: long videos use a lower bitrate so phones do not run out.
+        quality: end - start > LONG_VIDEO_SECONDS ? QUALITY_MEDIUM : QUALITY_HIGH,
         forceTranscode: true,
         // Bake the rotation into the pixels, so masks (found on upright frames) land in the right place.
         allowTransformationMetadata: false,

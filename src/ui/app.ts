@@ -161,7 +161,7 @@ export class App {
       h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
       h('p', { className: 'hint' }, t.pickHint),
       h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('text', t.optText), toggle('extra', t.optExtra)),
-      h('p', { className: 'hint' }, t.extraHint),
+      h('p', { className: 'hint small' }, t.extraHint),
     );
     this.bindDrop(dropZone);
 
@@ -177,8 +177,7 @@ export class App {
         'p',
         { className: 'badge', 'data-testid': 'offline-badge' },
         icon(ICONS.lock, 16),
-        t.offlineBadge,
-        this.offlineReady ? h('span', { className: 'ready' }, ` · ${t.offlineReady}`) : null,
+        h('span', {}, t.offlineBadge, this.offlineReady ? h('span', { className: 'ready' }, ` · ${t.offlineReady}`) : null),
       ),
       dropZone,
       this.bulkEl,
