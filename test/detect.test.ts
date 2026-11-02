@@ -201,3 +201,14 @@ describe('cover shapes', () => {
     expect(silhouetteFromMap(tiny, size, 16, 0.43)).toBeUndefined();
   });
 });
+
+describe('faces at the edge of the picture', () => {
+  it('keeps the whole oval, so a face cut by the edge is fully covered', async () => {
+    const { mergeDetections } = await import('../src/lib/detect/detector');
+    const { coverContains } = await import('../src/lib/masks');
+    // A face half outside the left edge.
+    const [d] = mergeDetections([{ model: 'face', box: { x: -20, y: 500, w: 60, h: 60 }, score: 0.9 }], 1000, 1000);
+    const c = { ...d!, shape: 'ellipse' as const };
+    for (const [x, y] of [[0, 500], [0, 560], [40, 500], [40, 560], [0, 530]] as const) expect(coverContains(c, x, y), `${x},${y}`).toBe(true);
+  });
+});

@@ -16,7 +16,7 @@ import { sourceFromBlob } from './bytes';
 import { assertSaneMovie, inspectVideo } from './bmff';
 import { finishVideo, soundConversion, type CleanVideoResult } from './clean-video';
 import type { Detector } from './detect/detector';
-import { paintCovers, sampleColors, type MaskStyle } from './masks';
+import { paintCovers, sampleColors, shrinkOutline, type MaskStyle } from './masks';
 import { masksAt, sampleTimes, type TimedBoxes } from './video-timeline';
 import { VideoCleanError } from './video-errors';
 
@@ -26,6 +26,10 @@ const SAMPLE_STEP = 1 / 3;
 const LONG_VIDEO_SECONDS = 180;
 /** Above this many people in a sampled frame, people get plain covers instead of outlines. */
 const MAX_OUTLINED_PEOPLE = 8;
+/** Person outlines are kept at this many cells per side in videos. */
+const VIDEO_OUTLINE_CELLS = 80;
+/** Memory for person outlines in one video; after that, people get plain covers (as safe, less shaped). */
+const MAX_OUTLINE_BYTES = 32 * 1024 * 1024;
 /** Longest side of the frames the detectors look at. */
 const DETECT_SIDE = 1280;
 
@@ -98,10 +102,19 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
     let i = 0;
     let framesWithMasks = 0;
     let maxObjects = 0;
+    let lastShown: number | undefined;
+    let outlineBytes = 0;
     for await (const wrapped of sink.canvasesAtTimestamps(times)) {
       checkAbort(opts.signal);
       const t = times[i++]!;
       if (!wrapped) continue;
+      // Low or variable frame rates give the same frame for several sample times: look at it once.
+      const shown = wrapped.timestamp ?? t;
+      if (lastShown !== undefined && Math.abs(shown - lastShown) < 1e-4) {
+        opts.onProgress?.('detect', i / times.length);
+        continue;
+      }
+      lastShown = shown;
       let found;
       try {
         const frame = wrapped.canvas as HTMLCanvasElement | OffscreenCanvas;
@@ -110,7 +123,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
             ? await detector.detect(frame, cw, ch, { faces: opts.faces, plates: opts.plates, people: opts.people ?? false, quick: true })
             : [];
         // Outline people so their covers follow the body; in a crowd plain boxes are used (much faster).
-        if (opts.people && found.filter((d) => d.kind === 'person').length <= MAX_OUTLINED_PEOPLE) {
+        if (opts.people && outlineBytes < MAX_OUTLINE_BYTES && found.filter((d) => d.kind === 'person').length <= MAX_OUTLINED_PEOPLE) {
           await detector.outlinePeople(frame, found).catch((e: unknown) => console.warn('people outlines unavailable', e));
         }
         if (opts.text) found = found.concat(await detector.detectText(frame, cw, ch, undefined, true));
@@ -121,14 +134,18 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       const fctx = (wrapped.canvas as HTMLCanvasElement | OffscreenCanvas).getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
       const colors = fctx && (opts.style ?? 'smart') === 'smart' ? sampleColors(fctx, found, 1, cw, ch) : [];
       const boxes = found.map((d, k) => {
-        const b: TimedBoxes['boxes'][number] = { x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale, shape: d.kind === 'face' ? 'ellipse' : d.silhouette ? 'silhouette' : 'rounded' };
-        if (d.silhouette) b.silhouette = d.silhouette;
+        const b: TimedBoxes['boxes'][number] = { x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale, shape: d.kind === 'face' ? 'ellipse' : d.silhouette && outlineBytes < MAX_OUTLINE_BYTES ? 'silhouette' : 'rounded' };
+        if (d.silhouette) {
+          // Kept at a lower resolution for the whole video (memory); a cell is kept if any part of it was set.
+          b.silhouette = shrinkOutline(d.silhouette, VIDEO_OUTLINE_CELLS);
+          outlineBytes += b.silhouette.data.length;
+        }
         if (colors[k]) b.color = colors[k];
         return b;
       });
       if (boxes.length) framesWithMasks++;
       maxObjects = Math.max(maxObjects, boxes.length);
-      timeline.push({ t: wrapped.timestamp ?? t, boxes });
+      timeline.push({ t: shown, boxes });
       opts.onProgress?.('detect', i / times.length);
     }
     timeline.sort((a, b) => a.t - b.t);

@@ -31,9 +31,12 @@ const BRAND = '#126354';
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
+/** How far a face oval reaches beyond its box (radius over half the box side). */
+export const ELLIPSE_REACH = 1.12;
+
 /** The face ellipse, sized so it contains the whole (already enlarged) face box's core. */
 export function ellipseOf(r: Rect): { cx: number; cy: number; rx: number; ry: number } {
-  return { cx: r.x + r.w / 2, cy: r.y + r.h / 2, rx: (r.w / 2) * 1.12, ry: (r.h / 2) * 1.12 };
+  return { cx: r.x + r.w / 2, cy: r.y + r.h / 2, rx: (r.w / 2) * ELLIPSE_REACH, ry: (r.h / 2) * ELLIPSE_REACH };
 }
 
 /** Traces the cover's outline (for the editor). Silhouettes are traced as their box. */
@@ -106,6 +109,21 @@ export function sampleColors(ctx: Ctx, covers: Rect[], scale: number, cw: number
   if (!covers.length) return [];
   const d = ctx.getImageData(0, 0, cw, ch).data;
   return covers.map((c) => ringColorFrom(d, cw, ch, c, scale));
+}
+
+/** A smaller copy of an outline (`cells` per side); a cell is set if any part of it was (never uncovers). */
+export function shrinkOutline(s: Silhouette, cells: number): Silhouette {
+  if (s.w <= cells && s.h <= cells) return s;
+  const w = Math.min(cells, s.w);
+  const h = Math.min(cells, s.h);
+  const data = new Uint8Array(w * h);
+  for (let y = 0; y < s.h; y++) {
+    const yy = Math.min(h - 1, Math.floor((y * h) / s.h));
+    for (let x = 0; x < s.w; x++) {
+      if (s.data[y * s.w + x]) data[yy * w + Math.min(w - 1, Math.floor((x * w) / s.w))] = 1;
+    }
+  }
+  return { w, h, data };
 }
 
 function silhouetteCanvas(c: Cover, s: number): OffscreenCanvas | HTMLCanvasElement | undefined {

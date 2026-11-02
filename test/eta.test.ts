@@ -25,3 +25,17 @@ describe('time left', () => {
     expect(minutesLeft(120)).toBe(2);
   });
 });
+
+describe('time left: odd progress', () => {
+  it('never guesses from a progress that is not a number', () => {
+    const c = tick(tick(undefined, 'cleaning', 0, 0), 'cleaning', 0.2, 1000);
+    expect(secondsLeft(c, Number.NaN, 20_000)).toBeUndefined();
+  });
+
+  it('times faces and text in a photo separately', () => {
+    let c = tick(undefined, 'detecting', 0, 0);
+    c = tick(c, 'detecting', 0.11, 1000);
+    c = tick(c, 'text', 0.2, 60_000);
+    expect(c.t0).toBe(60_000);
+  });
+});

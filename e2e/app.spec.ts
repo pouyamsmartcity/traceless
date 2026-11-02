@@ -748,6 +748,31 @@ test.describe('Pakkon', () => {
     expect(byPage).toEqual([]);
   });
 
+  test('never stores a wrong page in place of an app file (filter or captive portal pages)', async ({ page, context }) => {
+    test.skip(test.info().project.name !== 'desktop', 'one browser is enough');
+    // A network filter answers the model download with its own page.
+    await context.route('**/models/text-*', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>blocked</h1>' }));
+    await page.goto('/');
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const reg = await navigator.serviceWorker.getRegistration();
+            return reg?.installing || reg?.waiting || reg?.active ? 'busy' : 'failed';
+          }),
+        { timeout: 90_000 },
+      )
+      .toBe('failed');
+    const stored = await page.evaluate(async () => {
+      const out: string[] = [];
+      for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) out.push(new URL(r.url).pathname);
+      return out;
+    });
+    expect(stored.length).toBeGreaterThan(5);
+    expect(stored.filter((p) => p.includes('/models/text-'))).toEqual([]);
+    await expect(page.getByTestId('offline-badge')).not.toContainText('آمادهٔ کار بدون اینترنت');
+  });
+
   test('switches to English', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'English' }).click();

@@ -25,7 +25,7 @@ export function tick(clock: PhaseClock | undefined, phase: string, f: number, no
  * are mostly start-up and would give wild guesses).
  */
 export function secondsLeft(clock: PhaseClock | undefined, f: number, now: number): number | undefined {
-  if (!clock) return undefined;
+  if (!clock || !Number.isFinite(f)) return undefined;
   const done = f - clock.f0;
   const elapsed = now - clock.t0;
   if (elapsed < 4000 || done < 0.03 || f >= 1) return undefined;

@@ -44,7 +44,16 @@ window.addEventListener('paste', (e) => {
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   navigator.serviceWorker
     .register('./sw.js', { scope: './' })
-    .then(() => navigator.serviceWorker.ready)
+    .then((reg) => {
+      // If storing the offline copy fails (connection lost), the page loads the models itself right away.
+      const installing = reg.installing;
+      if (installing && !reg.active) {
+        installing.addEventListener('statechange', () => {
+          if (installing.state === 'redundant' && !navigator.serviceWorker.controller) app.setOfflineUnavailable();
+        });
+      }
+      return navigator.serviceWorker.ready;
+    })
     .then(() => app.setOfflineReady())
     .catch((e: unknown) => {
       console.warn('offline mode unavailable', e);

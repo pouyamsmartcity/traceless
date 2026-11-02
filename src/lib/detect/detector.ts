@@ -86,7 +86,8 @@ export function mergeDetections(found: { model: ModelId; box: Rect; score: numbe
     // Overlapping people in a crowd are distinct: merge person boxes less eagerly.
     for (const b of model === 'person' ? nms(mine, 0.6) : nms(mine, 0.3)) {
       // Grow masks a little: faces to cover hair and ears, plates to cover the frame, people their outline.
-      const grown = model === 'face' ? expand(b, 0.15, 0.2, w, h) : model === 'plate' ? expand(b, 0.12, 0.2, w, h) : expand(b, 0.06, 0.04, w, h);
+      // A face box is not cut at the picture's edge: its oval cover must stay whole to cover a face cut by the edge.
+      const grown = model === 'face' ? expand(b, 0.15, 0.2, Infinity, Infinity, false) : model === 'plate' ? expand(b, 0.12, 0.2, w, h) : expand(b, 0.06, 0.04, w, h);
       result.push({ ...grown, score: b.score, kind: model });
     }
   }

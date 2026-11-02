@@ -61,10 +61,10 @@ function positions(len: number, tile: number, step: number): number[] {
   return out;
 }
 
-/** Grows a box by the given fractions of its size on each side and clamps it to the image. */
-export function expand(r: Rect, fx: number, fy: number, imgW: number, imgH: number): Rect {
-  const x0 = Math.max(0, r.x - r.w * fx);
-  const y0 = Math.max(0, r.y - r.h * fy);
+/** Grows a box by the given fractions of its size on each side and clamps it to the image (unless `clamp` is false). */
+export function expand(r: Rect, fx: number, fy: number, imgW: number, imgH: number, clamp = true): Rect {
+  const x0 = Math.max(clamp ? 0 : -Infinity, r.x - r.w * fx);
+  const y0 = Math.max(clamp ? 0 : -Infinity, r.y - r.h * fy);
   const x1 = Math.min(imgW, r.x + r.w * (1 + fx));
   const y1 = Math.min(imgH, r.y + r.h * (1 + fy));
   return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };

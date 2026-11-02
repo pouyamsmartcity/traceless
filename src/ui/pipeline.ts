@@ -297,14 +297,15 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
   // Use the options as they were when processing started: switches changed meanwhile are handled
   // afterwards (photos are remade, videos offer "make again"), so notes always match the delivered file.
   const opts: Options = { ...liveOpts };
-  const set = (status: ItemStatus, progress?: number) => {
+  /** `step` names the piece of work being timed (one status can cover several, such as faces then text). */
+  const set = (status: ItemStatus, progress?: number, step: string = status) => {
     item.status = status;
-    if (progress === undefined) {
+    if (progress === undefined || !Number.isFinite(progress)) {
       delete item.progress;
       delete item.clock;
     } else {
       item.progress = progress;
-      item.clock = tick(item.clock, status, progress, Date.now());
+      item.clock = tick(item.clock, step, progress, Date.now());
     }
     update();
   };
@@ -391,7 +392,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
         // Keep whatever the passes that did work found.
         if (e instanceof DetectionError) item.detections = e.partial;
       }
-      if (opts.text) await ensureText(item, detector, (p) => set('detecting', p));
+      if (opts.text) await ensureText(item, detector, (p) => set('detecting', p, 'text'));
       set('cleaning');
       await renderImage(item, opts);
       if (item.detectFailed && coveringRequested(opts)) item.needsReview = true;

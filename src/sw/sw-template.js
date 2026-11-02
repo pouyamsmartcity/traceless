@@ -8,6 +8,21 @@ const CACHE = `pakkon-${VERSION}`;
  * cache instead of downloaded again (helps on slow or expensive connections). Files are stored one by one,
  * so when the connection drops during the first visit, what was already downloaded is kept and the next
  * try only fetches the rest. */
+/** Downloads one app file and checks it against its fingerprint, so a wrong page (a network filter or captive
+ * portal page, or a half-updated server) is never stored in place of an app file. */
+async function download(url) {
+  const response = await fetch(url, { cache: 'no-cache' });
+  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  const body = await response.arrayBuffer();
+  const want = new URL(url, self.location.href).searchParams.get('v');
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', body));
+  const got = Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('').slice(0, want ? want.length : 0);
+  if (want && got !== want) throw new Error(`${url}: content does not match`);
+  // Only the type is kept: the body is already decoded, so an encoding header would be wrong.
+  const type = response.headers.get('Content-Type');
+  return new Response(body, { status: 200, statusText: 'OK', headers: type ? { 'Content-Type': type } : {} });
+}
+
 async function precache() {
   const cache = await caches.open(CACHE);
   const old = (await caches.keys()).filter((k) => k.startsWith('pakkon-') && k !== CACHE && k !== 'pakkon-shared');
@@ -19,7 +34,7 @@ async function precache() {
       let hit;
       for (const name of old) if ((hit = await (await caches.open(name)).match(url))) break;
       if (hit) await cache.put(url, hit);
-      else await cache.add(url);
+      else await cache.put(url, await download(url));
     }
   }
   // A few downloads at a time; any failure fails the install, which the browser retries on a later visit.
