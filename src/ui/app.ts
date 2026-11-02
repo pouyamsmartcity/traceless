@@ -4,7 +4,7 @@ import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon } from './dom';
 import { openEditor } from './editor';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
-import { ensureText, newItem, processItem, renderImage, sameOptions, sameVideoOptions, type Item, type Options } from './pipeline';
+import { ensureText, locationRisks, lookForText, newItem, processItem, renderImage, sameOptions, sameVideoOptions, type Item, type Options } from './pipeline';
 
 interface Settings extends Options {
   lang: Lang;
@@ -103,6 +103,11 @@ export class App {
     this.queue = this.queue
       .then(() => processItem(item, this.settings, this.detector, () => this.updateCard(item)))
       .then(() => this.refresh(item))
+      .then(async () => {
+        if (item.media !== 'image' || item.status !== 'ready' || this.settings.text) return;
+        await lookForText(item, this.detector);
+        if (this.items.includes(item)) this.updateCard(item);
+      })
       .catch((e: unknown) => console.error(e));
   }
 
@@ -124,6 +129,20 @@ export class App {
       if (input.files?.length) this.addFiles(Array.from(input.files));
       input.value = '';
     });
+
+    // On phones: take a photo or video inside Pakkon, so the original never lands in the gallery.
+    const camera = h('input', {
+      type: 'file',
+      accept: 'image/*,video/*',
+      capture: 'environment',
+      className: 'visually-hidden',
+      'data-testid': 'camera-input',
+    });
+    camera.addEventListener('change', () => {
+      if (camera.files?.length) this.addFiles(Array.from(camera.files));
+      camera.value = '';
+    });
+    const touch = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 
     const toggle = (key: 'faces' | 'plates' | 'text' | 'extra' | 'mute', label: string) => {
       const box = h('input', { type: 'checkbox', checked: this.settings[key], 'data-testid': `opt-${key}` });
@@ -168,7 +187,8 @@ export class App {
       'section',
       { className: 'picker' },
       h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
-      h('p', { className: 'hint' }, t.pickHint),
+      touch ? h('label', { className: 'pick-btn secondary', 'data-testid': 'camera-button' }, camera, icon(ICONS.camera, 24), h('span', {}, t.takePhoto)) : null,
+      touch ? h('p', { className: 'hint small' }, t.takePhotoHint) : h('p', { className: 'hint' }, t.pickHint),
       h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('text', t.optText), toggle('mute', t.optMute), toggle('extra', t.optExtra)),
       h('p', { className: 'hint small' }, t.extraHint),
     );
@@ -360,6 +380,11 @@ export class App {
         const plates = used.plates ? count('plate') : 0;
         const texts = used.text ? count('text') : undefined;
         body.appendChild(h('p', { className: 'masks', 'data-testid': 'mask-summary' }, t.masksSummary(faces, plates, item.manual.length, texts)));
+        if (faces >= 10) body.appendChild(h('p', { className: 'note', 'data-testid': 'crowd' }, t.crowdCount(formatNumber(lang, faces))));
+        const risks = locationRisks(item, used);
+        if (risks.length) {
+          body.appendChild(h('p', { className: 'warn', 'data-testid': 'location-risk' }, risks.map((r) => (r === 'text' ? t.riskText : t.riskPlates)).join(' ')));
+        }
         if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
         if (used.extra) body.appendChild(h('p', { className: 'note', 'data-testid': 'extra-note' }, t.extraApplied));
         body.appendChild(h('p', { className: 'note' }, t.checkPicture));

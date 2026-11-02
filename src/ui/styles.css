@@ -148,6 +148,15 @@ a {
   cursor: pointer;
 }
 
+.pick-btn.secondary {
+  min-height: 52px;
+  margin-top: 10px;
+  border: 2px solid var(--brand);
+  background: transparent;
+  color: var(--brand);
+  font-size: 1.05rem;
+}
+
 .pick-btn:focus-within {
   outline: 3px solid var(--accent);
   outline-offset: 2px;

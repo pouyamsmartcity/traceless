@@ -27,6 +27,8 @@ export interface Item {
   detectFailed: boolean;
   /** Text detection has run for this photo. */
   textDetected: boolean;
+  /** Number of text regions seen by a quick look when text covering is off (for the location warning). */
+  textSeen?: number;
   droppedTracks: number;
   /** Video: what happened to faces and plates. */
   videoMasks?: 'covered' | 'off' | 'unavailable';
@@ -121,6 +123,30 @@ export async function ensureText(item: Item, detector: Detector, onProgress?: (f
     item.needsReview = true;
   }
   item.textDetected = true;
+}
+
+/**
+ * When text covering is off, takes a quick look for text anyway, only to warn that signs or writing may
+ * reveal the place. Nothing is covered by this look.
+ */
+export async function lookForText(item: Item, detector: Detector): Promise<void> {
+  if (item.textDetected || item.textSeen !== undefined || !item.decoded) return;
+  try {
+    const found = await detector.detectText(item.decoded.element, item.decoded.width, item.decoded.height, undefined, true);
+    item.textSeen = found.length;
+  } catch {
+    item.textSeen = 0;
+  }
+}
+
+/** Plain-language reasons why a photo may still reveal where it was taken, after cleaning. */
+export function locationRisks(item: Item, opts: Options): ('text' | 'plates')[] {
+  const risks: ('text' | 'plates')[] = [];
+  const visible = (kind: 'text' | 'plate') =>
+    item.detections.some((d, i) => d.kind === kind && (item.removed.has(i) || !kindEnabled(kind, opts)));
+  if (opts.text ? visible('text') : (item.textSeen ?? 0) > 0 || item.detections.some((d) => d.kind === 'text')) risks.push('text');
+  if (visible('plate')) risks.push('plates');
+  return risks;
 }
 
 /** The masks that will be painted: auto detections the user kept and enabled, plus hand-drawn ones. */

@@ -318,6 +318,37 @@ test.describe('Pakkon', () => {
     expect((await regionColor(page, { x: 100, y: 320, w: 200, h: 60 })).max).toBeGreaterThan(200); // the rest is kept
   });
 
+  test('counts the people in a crowd photo', async ({ page }) => {
+    await page.goto('/');
+    await addFile(page, fixture('real/astronaut-grid.jpg'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('crowd')).toContainText('۱۲');
+  });
+
+  test('warns that uncovered signs, writing or plates may reveal the place', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-plates').uncheck();
+    await addFile(page, fixture('real/iran-truck.png'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('location-risk')).toContainText('نوشته');
+    await expect(item.getByTestId('location-risk')).toContainText('پلاک');
+    await page.getByTestId('opt-plates').check();
+    await page.getByTestId('opt-text').check();
+    await readyItem(page);
+    await expect(item.getByTestId('mask-summary')).toContainText('نوشته');
+    await expect(item.getByTestId('location-risk')).toHaveCount(0);
+  });
+
+  test('offers the camera on phones only', async ({ page, isMobile }) => {
+    await page.goto('/');
+    if (isMobile) {
+      await expect(page.getByTestId('camera-button')).toBeVisible();
+      await expect(page.getByTestId('camera-input')).toHaveAttribute('capture', 'environment');
+    } else {
+      await expect(page.getByTestId('camera-button')).toHaveCount(0);
+    }
+  });
+
   test('a cover can be drawn by hand', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('leaky/screenshot-leaky.png'));

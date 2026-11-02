@@ -238,8 +238,14 @@ export class Detector {
    * Finds text (signs, names, numbers). The picture is enlarged 1.5x (up to 1920 px) because small
    * text is common; very large photos are also scanned in four overlapping parts.
    */
-  async detectText(source: CanvasImageSource, w: number, h: number, onProgress?: (fraction: number) => void): Promise<Detection[]> {
-    const passes = planTextPasses(w, h);
+  async detectText(
+    source: CanvasImageSource,
+    w: number,
+    h: number,
+    onProgress?: (fraction: number) => void,
+    quick = false,
+  ): Promise<Detection[]> {
+    const passes = planTextPasses(w, h, quick);
     const found: Detection[] = [];
     const canvas = document.createElement('canvas');
     try {
@@ -281,15 +287,16 @@ const TEXT_MAX_SIDE = 1920;
 const round32 = (v: number) => Math.max(32, Math.round(v / 32) * 32);
 
 /** Plans the regions the text model looks at, and the input size for each. Exported for tests. */
-export function planTextPasses(w: number, h: number): { region: Rect; inW: number; inH: number }[] {
+export function planTextPasses(w: number, h: number, quick = false): { region: Rect; inW: number; inH: number }[] {
   const plan = (region: Rect) => {
     const long = Math.max(region.w, region.h);
-    const target = Math.min(TEXT_MAX_SIDE, Math.max(960, 1.5 * long));
+    // A quick look (one pass, at most 1280 px) is enough to warn that a picture holds text.
+    const target = quick ? Math.min(1280, Math.max(640, long)) : Math.min(TEXT_MAX_SIDE, Math.max(960, 1.5 * long));
     const s = target / long;
     return { region, inW: round32(region.w * s), inH: round32(region.h * s) };
   };
   const passes = [plan({ x: 0, y: 0, w, h })];
-  if (Math.max(w, h) > 2400) {
+  if (!quick && Math.max(w, h) > 2400) {
     const tile = Math.ceil(Math.max(w, h) * 0.55);
     for (const t of tiles(w, h, tile, 0.1)) passes.push(plan(t));
   }
