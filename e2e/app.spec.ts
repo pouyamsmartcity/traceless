@@ -304,6 +304,20 @@ test.describe('Pakkon', () => {
     expect(face.max).toBeLessThan(8);
   });
 
+  test('offers to cover the status bar of a phone screenshot', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-faces').uncheck();
+    await page.getByTestId('opt-plates').uncheck();
+    await addFile(page, fixture('real/phone-screenshot.png'));
+    const item = await readyItem(page);
+    expect((await regionColor(page, { x: 100, y: 20, w: 300, h: 50 })).max).toBeGreaterThan(200); // status text visible
+    await item.getByTestId('cover-status-bar').click();
+    await readyItem(page);
+    await expect(item.getByTestId('cover-status-bar')).toHaveCount(0);
+    expect((await regionColor(page, { x: 0, y: 0, w: 1080, h: 120 })).max).toBeLessThan(8);
+    expect((await regionColor(page, { x: 100, y: 320, w: 200, h: 60 })).max).toBeGreaterThan(200); // the rest is kept
+  });
+
   test('a cover can be drawn by hand', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('leaky/screenshot-leaky.png'));

@@ -438,6 +438,15 @@ export class App {
         if (await openEditor(item, this.settings, t)) await this.refresh(item, true);
       });
       row.appendChild(edit);
+      const bar = statusBarRect(item);
+      if (bar && !item.manual.some((m) => m.y === 0 && m.x === 0 && m.w === bar.w && m.h === bar.h)) {
+        const cover = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'cover-status-bar' }, t.coverStatusBar);
+        cover.addEventListener('click', async () => {
+          item.manual.push(bar);
+          await this.refresh(item, true);
+        });
+        row.appendChild(cover);
+      }
     }
     return row;
   }
@@ -512,6 +521,18 @@ export class App {
     btn.addEventListener('click', () => void shareOrSave(files));
     this.bulkEl.appendChild(btn);
   }
+}
+
+/**
+ * For a phone screenshot (a tall PNG), the area of the status bar at the top: time, carrier, battery and
+ * notification icons can tell where and when, and which apps someone uses. Undefined for other pictures.
+ */
+export function statusBarRect(item: Item): { x: number; y: number; w: number; h: number } | undefined {
+  const d = item.decoded;
+  if (!d || item.outputType !== 'image/png') return undefined;
+  if (d.height / d.width < 1.7) return undefined;
+  // 12% of the width covers the tallest status bars (iPhones with a notch or Dynamic Island).
+  return { x: 0, y: 0, w: d.width, h: Math.round(d.width * 0.12) };
 }
 
 function canShareFiles(files: File[]): boolean {
