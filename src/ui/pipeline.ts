@@ -34,6 +34,8 @@ export interface Item {
   abort?: AbortController;
   output?: { blob: Blob; name: string; url: string };
   error?: ErrorKind;
+  /** Technical detail of an error, shown so a user can report it (never contains file contents). */
+  errorDetail?: string;
 }
 
 export interface Options {
@@ -44,6 +46,9 @@ export interface Options {
 }
 
 let nextId = 1;
+
+/** The whole new video is built in memory; beyond this size phones run out of memory. */
+const MAX_VIDEO_BYTES = 2 * 1024 ** 3;
 
 export function isVideoFile(file: File): boolean {
   if (file.type.startsWith('video/')) return true;
@@ -119,6 +124,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
   try {
     set('reading');
     if (item.media === 'video') {
+      if (item.file.size > MAX_VIDEO_BYTES) throw new RangeError('video larger than 2 GB');
       const inspection = await inspectVideo(sourceFromBlob(item.file));
       item.findings = inspection.findings;
       item.partial = inspection.partial;
@@ -186,6 +192,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
   } catch (e) {
     console.error(e);
     item.error = errorKind(e);
+    item.errorDetail = (e instanceof Error ? `${e.name}: ${e.message}` : String(e)).slice(0, 300);
     set('error');
   }
 }

@@ -11,11 +11,15 @@ app.start();
 
 /** Picks up files sent to Pakkon from another app's share sheet (Android, installed app). */
 async function takeSharedFiles(): Promise<void> {
-  const params = new URLSearchParams(location.search);
-  if (!params.has('shared')) return;
-  history.replaceState(null, '', location.pathname);
   if (!('caches' in window)) return;
+  const params = new URLSearchParams(location.search);
   const cache = await caches.open(SHARE_CACHE);
+  if (!params.has('shared')) {
+    // Shared originals must never linger in storage: remove any left from an interrupted share.
+    for (const req of await cache.keys()) await cache.delete(req);
+    return;
+  }
+  history.replaceState(null, '', location.pathname);
   const files: File[] = [];
   for (const req of await cache.keys()) {
     const res = await cache.match(req);

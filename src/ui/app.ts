@@ -106,7 +106,7 @@ export class App {
 
     const input = h('input', {
       type: 'file',
-      accept: 'image/*,video/*,.heic,.heif',
+      accept: 'image/*,video/*',
       multiple: true,
       className: 'visually-hidden',
       'data-testid': 'file-input',
@@ -287,6 +287,9 @@ export class App {
         generic: t.errGeneric,
       }[item.error ?? 'generic'];
       body.appendChild(h('p', { className: 'error', role: 'alert', 'data-testid': 'item-error' }, msg));
+      if (item.errorDetail) {
+        body.appendChild(h('details', { className: 'detail' }, h('summary', {}, t.errorDetails), h('code', { dir: 'ltr' }, item.errorDetail)));
+      }
     } else {
       const n = item.progress !== undefined && item.status !== 'ready' ? Math.round(item.progress * 100) : undefined;
       const pct = n === undefined ? '' : ` ${formatNumber(lang, n)}${lang === 'fa' ? '٪' : '%'}`;
@@ -317,6 +320,11 @@ export class App {
     }
 
     if (item.findings.length || item.status === 'ready') body.appendChild(this.findingsView(item));
+    if (item.status === 'ready') {
+      body.appendChild(
+        h('details', { className: 'checklist', 'data-testid': 'checklist' }, h('summary', {}, t.checklistTitle), h('ul', {}, ...t.checklist.map((c) => h('li', {}, c)))),
+      );
+    }
 
     if (item.status === 'ready' || item.status === 'error') {
       const rm = h('button', { type: 'button', className: 'link' }, t.remove);

@@ -5,13 +5,24 @@ const PRECACHE = __FILES__;
 const CACHE = `pakkon-${VERSION}`;
 const SHARE_CACHE = 'pakkon-shared';
 
+/** Stores every app file. Files that did not change since the last version are copied from the old
+ * cache instead of downloaded again (helps on slow or expensive connections). */
+async function precache() {
+  const cache = await caches.open(CACHE);
+  const old = (await caches.keys()).filter((k) => k.startsWith('pakkon-') && k !== CACHE && k !== SHARE_CACHE);
+  const missing = [];
+  for (const url of PRECACHE) {
+    // Every entry ends in ?v=<content fingerprint>: an exact match in an old cache is the same file.
+    let hit;
+    for (const name of old) if ((hit = await (await caches.open(name)).match(url))) break;
+    if (hit) await cache.put(url, hit);
+    else missing.push(url);
+  }
+  await cache.addAll(missing);
+}
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(PRECACHE))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(precache().then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -59,7 +70,7 @@ self.addEventListener('fetch', (event) => {
   }
   if (request.method !== 'GET') return;
   if (request.mode === 'navigate') {
-    event.respondWith(caches.match('./index.html', { cacheName: CACHE, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));
+    event.respondWith(caches.match('./index.html', { cacheName: CACHE, ignoreSearch: true, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));
     return;
   }
   event.respondWith(caches.match(request, { cacheName: CACHE, ignoreSearch: true, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));

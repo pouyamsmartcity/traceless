@@ -65,11 +65,18 @@ function serviceWorker(): Plugin {
         .filter((f) => f !== 'sw.js' && !f.endsWith('.map') && !f.endsWith('.md'))
         .sort();
       const hash = createHash('sha256');
-      for (const f of files) hash.update(f).update(readFileSync(join(dist, f)));
+      // Each entry carries a fingerprint of its content (?v=...), so an update can reuse unchanged files.
+      const list: string[] = [];
+      for (const f of files) {
+        const content = readFileSync(join(dist, f));
+        const fileHash = createHash('sha256').update(content).digest('hex').slice(0, 12);
+        hash.update(f).update(fileHash);
+        list.push(`./${f}?v=${fileHash}`);
+        if (f === 'index.html') list.push(`./?v=${fileHash}`);
+      }
       const template = readFileSync(join(ROOT, 'src/sw/sw-template.js'), 'utf8');
       hash.update(template);
       const version = hash.digest('hex').slice(0, 12);
-      const list = ['./', ...files.map((f) => `./${f}`)];
       writeFileSync(join(dist, 'sw.js'), template.replace('__VERSION__', version).replace('__FILES__', JSON.stringify(list, null, 2)));
     },
   };

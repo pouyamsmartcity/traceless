@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { sourceFromBytes } from '../src/lib/bytes';
 import { inspectVideo } from '../src/lib/bmff';
@@ -210,6 +211,36 @@ test.describe('Pakkon', () => {
     // Corners hold picture, not empty background.
     const corner = await regionColor(page, { x: 0, y: 0, w: 4, h: 4 });
     expect(corner.max).toBeGreaterThan(20);
+  });
+
+  test('receives photos shared from another app (Android share sheet)', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('offline-badge')).toContainText('آمادهٔ کار بدون اینترنت', { timeout: 90_000 });
+    const bytes = Array.from(readFileSync(fixture('leaky/photo-everything.jpg')));
+    // What the system share sheet does: a form POST to the share target, handled by the offline worker.
+    const finalUrl = await page.evaluate(async (data) => {
+      const fd = new FormData();
+      fd.append('media', new File([new Uint8Array(data)], 'IMG_20260921_183000.jpg', { type: 'image/jpeg' }));
+      const r = await fetch('./share-target', { method: 'POST', body: fd });
+      return r.url;
+    }, bytes);
+    expect(finalUrl).toContain('?shared=1');
+    await page.goto('/?shared=1');
+    const item = await readyItem(page);
+    await expect(item.getByTestId('findings').locator('[data-finding="gps"]').first()).toBeVisible();
+    const { name } = await outputBytes(page);
+    expect(name).not.toContain('IMG_2026');
+    // The shared file does not stay behind in storage, and the address bar is cleaned.
+    expect(await page.evaluate(async () => (await (await caches.open('pakkon-shared')).keys()).length)).toBe(0);
+    expect(page.url()).not.toContain('shared');
+  });
+
+  test('shows a "check before sending" list with the safe copy', async ({ page }) => {
+    await page.goto('/');
+    await addFile(page, fixture('leaky/screenshot-leaky.png'));
+    const item = await readyItem(page);
+    await item.getByTestId('checklist').locator('summary').click();
+    await expect(item.getByTestId('checklist')).toContainText('سایه');
   });
 
   test('a cover can be drawn by hand', async ({ page }) => {

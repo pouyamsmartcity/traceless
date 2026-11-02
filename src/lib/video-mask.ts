@@ -55,6 +55,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
     if (!track) throw new VideoCleanError('noVideo', 'no video track');
     const W = await track.getDisplayWidth();
     const H = await track.getDisplayHeight();
+    if (typeof OffscreenCanvas === 'undefined') throw new VideoCleanError('cannotMask', 'no OffscreenCanvas');
     const canDecode = typeof VideoDecoder !== 'undefined' && (await track.canDecode().catch(() => false));
     const canEncode = typeof VideoEncoder !== 'undefined' && (await canEncodeVideo('avc', { width: W, height: H }).catch(() => false));
     if (!canDecode || !canEncode) throw new VideoCleanError('cannotMask', `decode ${canDecode}, encode ${canEncode}`);
@@ -75,11 +76,16 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       checkAbort(opts.signal);
       const t = times[i++]!;
       if (!wrapped) continue;
-      const found = await detector.detect(wrapped.canvas as HTMLCanvasElement | OffscreenCanvas, cw, ch, {
-        faces: opts.faces,
-        plates: opts.plates,
-        quick: true,
-      });
+      let found;
+      try {
+        found = await detector.detect(wrapped.canvas as HTMLCanvasElement | OffscreenCanvas, cw, ch, {
+          faces: opts.faces,
+          plates: opts.plates,
+          quick: true,
+        });
+      } catch (e) {
+        throw new VideoCleanError('cannotMask', `detection failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
       const boxes = found.map((d) => ({ x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale }));
       if (boxes.length) framesWithMasks++;
       maxObjects = Math.max(maxObjects, boxes.length);
