@@ -66,6 +66,7 @@ export interface Options {
 
 /** The options a video was made with (shown on its card; a rebuild is offered when they change). */
 export interface VideoOptions {
+  text: boolean;
   faces: boolean;
   plates: boolean;
   mute: boolean;
@@ -191,7 +192,7 @@ export async function renderImage(item: Item, opts: Options): Promise<void> {
 }
 
 export function sameVideoOptions(a: VideoOptions | undefined, b: Options): boolean {
-  return !!a && a.faces === b.faces && a.plates === b.plates && a.mute === b.mute;
+  return !!a && a.faces === b.faces && a.plates === b.plates && a.text === b.text && a.mute === b.mute;
 }
 
 export function sameOptions(a: Options | undefined, b: Options): boolean {
@@ -220,7 +221,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
       // The video code is large, so it is only loaded when a video is added.
       const { cleanVideo } = await import('../lib/clean-video');
       let bytes: Uint8Array | undefined;
-      if ((opts.faces || opts.plates) && !item.skipVideoMasks) {
+      if ((opts.faces || opts.plates || opts.text) && !item.skipVideoMasks) {
         const { cleanVideoWithMasks } = await import('../lib/video-mask');
         item.abort = new AbortController();
         try {
@@ -228,6 +229,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
           const r = await cleanVideoWithMasks(item.file, detector, {
             faces: opts.faces,
             plates: opts.plates,
+            text: opts.text,
             mute: opts.mute,
             signal: item.abort.signal,
             onProgress: (phase, p) => set(phase === 'detect' ? 'detecting' : 'cleaning', p),
@@ -253,7 +255,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
         item.droppedTracks = result.droppedTracks;
       }
       const covered = !item.skipVideoMasks;
-      item.videoMadeWith = { faces: opts.faces && covered, plates: opts.plates && covered, mute: opts.mute };
+      item.videoMadeWith = { faces: opts.faces && covered, plates: opts.plates && covered, text: opts.text && covered, mute: opts.mute };
       setOutput(item, new Blob([bytes as BlobPart], { type: 'video/mp4' }), 'mp4');
       item.output!.name = item.output!.name.replace(/^img-/, 'vid-');
     } else {

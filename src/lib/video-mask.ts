@@ -30,6 +30,8 @@ const DETECT_SIDE = 1280;
 export interface MaskedVideoOptions {
   faces: boolean;
   plates: boolean;
+  /** Also cover text (signs, names, numbers). */
+  text?: boolean;
   /** Leave the sound out. */
   mute?: boolean;
   onProgress?: (phase: 'detect' | 'encode', fraction: number) => void;
@@ -92,11 +94,9 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       if (!wrapped) continue;
       let found;
       try {
-        found = await detector.detect(wrapped.canvas as HTMLCanvasElement | OffscreenCanvas, cw, ch, {
-          faces: opts.faces,
-          plates: opts.plates,
-          quick: true,
-        });
+        const frame = wrapped.canvas as HTMLCanvasElement | OffscreenCanvas;
+        found = opts.faces || opts.plates ? await detector.detect(frame, cw, ch, { faces: opts.faces, plates: opts.plates, quick: true }) : [];
+        if (opts.text) found = found.concat(await detector.detectText(frame, cw, ch, undefined, true));
       } catch (e) {
         throw new VideoCleanError('cannotMask', `detection failed: ${e instanceof Error ? e.message : String(e)}`);
       }

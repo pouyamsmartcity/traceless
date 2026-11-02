@@ -438,6 +438,18 @@ test.describe('Pakkon', () => {
     expect((await inspectVideo(sourceFromBytes(again.bytes))).tracks.sort()).toEqual(['soun', 'vide']);
   });
 
+  test('covers text in a video when asked', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-text').check();
+    await addFile(page, fixture('real/iran-truck.mp4'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('video-masks')).toHaveAttribute('data-state', 'covered');
+    // The camera's date stamp (x 560-688, y 15-33) is covered throughout.
+    for (const t of [0.2, 1.0, 1.8]) {
+      expect((await videoRegion(page, t, { x: 575, y: 19, w: 100, h: 10 })).max, `text visible at ${t}s`).toBeLessThan(40);
+    }
+  });
+
   test('with covering switched off, a video is only re-packaged', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('opt-faces').uncheck();

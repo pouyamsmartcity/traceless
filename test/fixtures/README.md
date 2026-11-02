@@ -18,4 +18,5 @@ The tests check that Pakkon reports these leaks and that the cleaned files conta
 | `astronaut-pan.mp4`, `astronaut-pan-rotated.mp4`, `astronaut-fast.m2ts` | Made with ffmpeg from `astronaut.png` (a slow pan, the same stored sideways with a rotation tag, and a fast pan in an MPEG-TS file whose timestamps start at about 1.5 s, like camcorder files). The x264 encoder leaves its name and settings inside the video stream, which the tests use as a stand-in for camera data. | Public domain |
 | `astronaut-grid.jpg` | `astronaut.png` repeated 4 x 3 (a "crowd" of 12 faces) | Public domain |
 | `phone-screenshot.png` | A synthetic phone screenshot (drawn with Pillow) with a dark status bar | Made for this project, public domain |
+| `iran-truck.mp4` | A 2-second still video made with ffmpeg from `iran-truck.png` | MIT, as `iran-truck.png` |
 | `iran-truck.png` | `files/2.png` from [barzansaeedpour/ANPR-YOLOv8](https://github.com/barzansaeedpour/ANPR-YOLOv8) (detection overlay included) | MIT, Copyright (c) Barzan Saeedpour |
