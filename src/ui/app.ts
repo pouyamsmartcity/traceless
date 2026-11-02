@@ -4,14 +4,14 @@ import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon } from './dom';
 import { openEditor } from './editor';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
-import { ensureText, newItem, processItem, renderImage, sameOptions, type Item, type Options } from './pipeline';
+import { ensureText, newItem, processItem, renderImage, sameOptions, sameVideoOptions, type Item, type Options } from './pipeline';
 
 interface Settings extends Options {
   lang: Lang;
 }
 
 function loadSettings(): Settings {
-  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false };
+  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false };
   try {
     const raw = localStorage.getItem('pakkon-settings');
     if (raw) {
@@ -22,6 +22,7 @@ function loadSettings(): Settings {
         plates: s.plates !== false,
         extra: s.extra === true,
         text: s.text === true,
+        mute: s.mute === true,
       };
     }
   } catch {
@@ -124,11 +125,12 @@ export class App {
       input.value = '';
     });
 
-    const toggle = (key: 'faces' | 'plates' | 'text' | 'extra', label: string) => {
+    const toggle = (key: 'faces' | 'plates' | 'text' | 'extra' | 'mute', label: string) => {
       const box = h('input', { type: 'checkbox', checked: this.settings[key], 'data-testid': `opt-${key}` });
       box.addEventListener('change', () => {
         this.settings[key] = box.checked;
         saveSettings(this.settings);
+        for (const it of this.items) if (it.media === 'video' && it.status === 'ready') this.updateCard(it);
         void this.rerenderAll();
       });
       return h('label', { className: 'switch' }, box, h('span', {}, label));
@@ -167,7 +169,7 @@ export class App {
       { className: 'picker' },
       h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
       h('p', { className: 'hint' }, t.pickHint),
-      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('text', t.optText), toggle('extra', t.optExtra)),
+      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('text', t.optText), toggle('mute', t.optMute), toggle('extra', t.optExtra)),
       h('p', { className: 'hint small' }, t.extraHint),
     );
     this.bindDrop(dropZone);
@@ -365,6 +367,19 @@ export class App {
         const videoNote = { covered: t.videoCovered, off: t.videoMasksOff, unavailable: t.videoMasksUnavailable }[item.videoMasks ?? 'off'];
         body.appendChild(h('p', { className: item.videoMasks === 'covered' ? 'note' : 'warn', 'data-testid': 'video-masks', 'data-state': item.videoMasks ?? 'off' }, videoNote));
         if (item.droppedTracks > 0) body.appendChild(h('p', { className: 'note' }, t.videoDropped(item.droppedTracks)));
+        if (item.videoMadeWith?.mute) body.appendChild(h('p', { className: 'note', 'data-testid': 'muted-note' }, t.videoMuted));
+        if (!sameVideoOptions(item.videoMadeWith, this.settings)) {
+          const again = h('button', { type: 'button', className: 'btn ghost small', 'data-testid': 'rebuild' }, t.rebuildVideo);
+          again.addEventListener('click', () => {
+            if (item.output) URL.revokeObjectURL(item.output.url);
+            delete item.output;
+            delete item.skipVideoMasks;
+            item.status = 'queued';
+            this.updateCard(item);
+            this.enqueue(item);
+          });
+          body.appendChild(again);
+        }
       }
       if (item.needsReview) body.appendChild(this.reviewGate(item));
       else body.appendChild(this.actions(item));

@@ -21,6 +21,7 @@ export interface CleanVideoResult {
 export async function cleanVideo(
   file: Blob,
   onProgress?: (fraction: number) => void,
+  opts: { mute?: boolean } = {},
 ): Promise<CleanVideoResult> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
@@ -48,6 +49,8 @@ export async function cleanVideo(
       tracks: 'primary',
       tags: {},
       showWarnings: false,
+      // Voices and background sounds can identify people and places: the sound can be left out entirely.
+      ...(opts.mute ? { audio: { discard: true } } : {}),
     });
     const keptVideo = conversion.utilizedTracks.some((t) => t.isVideoTrack());
     if (!conversion.isValid || !keptVideo) {

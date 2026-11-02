@@ -130,3 +130,12 @@ describe('SEI and AV1 metadata stripping', () => {
     expect(out.length).toBe(desc.length - 7);
   });
 });
+
+describe('remove sound', () => {
+  it('leaves the sound track out when asked', async () => {
+    const { bytes } = await cleanVideo(new Blob([fixture('video-location.mp4')]), undefined, { mute: true });
+    const r = await inspectVideo(sourceFromBytes(bytes));
+    expect(r.tracks).toEqual(['vide']);
+    expect(await videoLeftovers(bytes)).toEqual([]);
+  });
+});

@@ -44,6 +44,8 @@ export interface Item {
   stale?: boolean;
   /** The user chose to continue without covering in a video whose covering failed. */
   skipVideoMasks?: boolean;
+  /** Video: the options its safe copy was made with. */
+  videoMadeWith?: VideoOptions;
   error?: ErrorKind;
   /** Technical detail of an error, shown so a user can report it (never contains file contents). */
   errorDetail?: string;
@@ -56,6 +58,15 @@ export interface Options {
   extra: boolean;
   /** Cover text in photos (signs, names, numbers). */
   text: boolean;
+  /** Leave the sound out of videos. */
+  mute: boolean;
+}
+
+/** The options a video was made with (shown on its card; a rebuild is offered when they change). */
+export interface VideoOptions {
+  faces: boolean;
+  plates: boolean;
+  mute: boolean;
 }
 
 let nextId = 1;
@@ -142,7 +153,7 @@ function setOutput(item: Item, blob: Blob, ext: string): void {
 /** Builds (or rebuilds after editing) the safe copy of an image whose detections are known. */
 export async function renderImage(item: Item, opts: Options): Promise<void> {
   if (!item.decoded || !item.outputType) throw new Error('image not decoded');
-  const snapshot: Options = { faces: opts.faces, plates: opts.plates, text: opts.text, extra: opts.extra };
+  const snapshot: Options = { faces: opts.faces, plates: opts.plates, text: opts.text, extra: opts.extra, mute: opts.mute };
   const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra });
   const type = item.outputType;
   const ext = type === 'image/png' ? 'png' : 'jpg';
@@ -151,6 +162,10 @@ export async function renderImage(item: Item, opts: Options): Promise<void> {
   setOutput(item, new Blob([bytes as BlobPart], { type }), ext);
   if (name) item.output!.name = name;
   item.renderedWith = snapshot;
+}
+
+export function sameVideoOptions(a: VideoOptions | undefined, b: Options): boolean {
+  return !!a && a.faces === b.faces && a.plates === b.plates && a.mute === b.mute;
 }
 
 export function sameOptions(a: Options | undefined, b: Options): boolean {
@@ -187,6 +202,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
           const r = await cleanVideoWithMasks(item.file, detector, {
             faces: opts.faces,
             plates: opts.plates,
+            mute: opts.mute,
             signal: item.abort.signal,
             onProgress: (phase, p) => set(phase === 'detect' ? 'detecting' : 'cleaning', p),
           });
@@ -206,10 +222,12 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
       }
       if (!bytes) {
         set('cleaning', 0);
-        const result = await cleanVideo(item.file, (p) => set('cleaning', p));
+        const result = await cleanVideo(item.file, (p) => set('cleaning', p), { mute: opts.mute });
         bytes = result.bytes;
         item.droppedTracks = result.droppedTracks;
       }
+      const covered = !item.skipVideoMasks;
+      item.videoMadeWith = { faces: opts.faces && covered, plates: opts.plates && covered, mute: opts.mute };
       setOutput(item, new Blob([bytes as BlobPart], { type: 'video/mp4' }), 'mp4');
       item.output!.name = item.output!.name.replace(/^img-/, 'vid-');
     } else {

@@ -30,6 +30,8 @@ const DETECT_SIDE = 1280;
 export interface MaskedVideoOptions {
   faces: boolean;
   plates: boolean;
+  /** Leave the sound out. */
+  mute?: boolean;
   onProgress?: (phase: 'detect' | 'encode', fraction: number) => void;
   signal?: AbortSignal;
 }
@@ -119,6 +121,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       tracks: 'primary',
       tags: {},
       showWarnings: false,
+      ...(opts.mute ? { audio: { discard: true } } : {}),
       trim: { start: shift },
       video: {
         codec: 'avc',

@@ -376,6 +376,23 @@ test.describe('Pakkon', () => {
     }
   });
 
+  test('removes the sound from a video when asked, and offers to remake it after a change', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-mute').check();
+    await addFile(page, fixture('real/astronaut-pan.mp4'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('muted-note')).toBeVisible();
+    const { bytes } = await outputBytes(page);
+    expect((await inspectVideo(sourceFromBytes(bytes))).tracks).toEqual(['vide']);
+    await expect(item.getByTestId('rebuild')).toHaveCount(0);
+    await page.getByTestId('opt-mute').uncheck();
+    await item.getByTestId('rebuild').click();
+    await readyItem(page);
+    await expect(item.getByTestId('muted-note')).toHaveCount(0);
+    const again = await outputBytes(page);
+    expect((await inspectVideo(sourceFromBytes(again.bytes))).tracks.sort()).toEqual(['soun', 'vide']);
+  });
+
   test('with covering switched off, a video is only re-packaged', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('opt-faces').uncheck();
