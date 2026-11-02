@@ -48,6 +48,7 @@ export class App {
   private settings = loadSettings();
   private readonly items: Item[] = [];
   private readonly cards = new Map<number, HTMLElement>();
+  private readonly previews = new Map<number, { key: string; el: HTMLElement; release: () => void }>();
   private readonly detector: Detector;
   private queue: Promise<void> = Promise.resolve();
   private places: Place[] | undefined;
@@ -428,35 +429,17 @@ export class App {
     card.dataset.status = item.status;
 
     // Preview: always the safe copy once it exists, so the user checks exactly what will be sent.
-    let preview: HTMLElement;
-    if (item.output && item.media === 'image') {
-      preview = h('img', { src: item.output.url, alt: t.statusReady, className: 'preview', 'data-testid': 'output-image' });
-    } else if (item.output && item.media === 'video') {
-      preview = h('video', { src: item.output.url, controls: true, playsinline: true, preload: 'metadata', className: 'preview' });
+    // While the copy stays the same, the same preview (and its compare button) is kept, so a card refresh
+    // (for example when a background check finishes) never interrupts a press or reloads the picture.
+    const key = `${item.status}|${item.output?.url ?? ''}|${this.settings.lang}`;
+    const cached = this.previews.get(item.id);
+    if (cached && cached.key === key) {
+      card.appendChild(cached.el);
     } else {
-      preview = h('div', { className: 'preview placeholder' }, item.status === 'error' ? icon(ICONS.alert, 32) : h('div', { className: 'spinner' }));
-    }
-    card.appendChild(preview);
-    // Hold to see the original in place of the safe copy (only on this screen; it is never shared).
-    if (item.status === 'ready' && item.output && item.media === 'image' && item.decoded && preview instanceof HTMLImageElement) {
-      const img = preview;
-      const safeUrl = item.output.url;
-      const origUrl = item.decoded.url;
-      const compare = h('button', { type: 'button', className: 'btn small compare', 'data-testid': 'compare' }, t.holdToCompare);
-      const show = (orig: boolean) => {
-        img.src = orig ? origUrl : safeUrl;
-        compare.classList.toggle('active', orig);
-      };
-      compare.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        show(true);
-      });
-      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) compare.addEventListener(ev, () => show(false));
-      compare.addEventListener('keydown', (e) => {
-        if (e.key === ' ' || e.key === 'Enter') show(true);
-      });
-      compare.addEventListener('keyup', () => show(false));
-      card.appendChild(h('div', { className: 'compare-row' }, compare));
+      if (cached) cached.release();
+      const built = this.buildPreview(item);
+      this.previews.set(item.id, { key, ...built });
+      card.appendChild(built.el);
     }
 
     const body = h('div', { className: 'card-body' });
@@ -607,6 +590,48 @@ export class App {
     return h('div', { className: 'review', role: 'alert' }, h('p', { className: 'warn' }, t.reviewNeeded), row);
   }
 
+  private buildPreview(item: Item): { el: HTMLElement; release: () => void } {
+    const t = this.t;
+    const wrap = h('div', { className: 'preview-wrap' });
+    let preview: HTMLElement;
+    if (item.output && item.media === 'image') {
+      preview = h('img', { src: item.output.url, alt: t.statusReady, className: 'preview', 'data-testid': 'output-image' });
+    } else if (item.output && item.media === 'video') {
+      preview = h('video', { src: item.output.url, controls: true, playsinline: true, preload: 'metadata', className: 'preview' });
+    } else {
+      preview = h('div', { className: 'preview placeholder' }, item.status === 'error' ? icon(ICONS.alert, 32) : h('div', { className: 'spinner' }));
+    }
+    wrap.appendChild(preview);
+    let release = (): void => undefined;
+    // Hold to see the original in place of the safe copy (only on this screen; it is never shared).
+    if (item.status === 'ready' && item.output && item.media === 'image' && item.decoded && preview instanceof HTMLImageElement) {
+      const img = preview;
+      const safeUrl = item.output.url;
+      const origUrl = item.decoded.url;
+      const compare = h('button', { type: 'button', className: 'btn small compare', 'data-testid': 'compare' }, t.holdToCompare);
+      const show = (orig: boolean) => {
+        img.src = orig ? origUrl : safeUrl;
+        compare.classList.toggle('active', orig);
+      };
+      compare.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        show(true);
+        // Whatever happens to the button, letting go anywhere shows the safe copy again.
+        window.addEventListener('pointerup', () => show(false), { once: true });
+        window.addEventListener('pointercancel', () => show(false), { once: true });
+      });
+      for (const ev of ['pointerup', 'pointercancel']) compare.addEventListener(ev, () => show(false));
+      compare.addEventListener('keydown', (e) => {
+        if (e.key === ' ' || e.key === 'Enter') show(true);
+      });
+      compare.addEventListener('keyup', () => show(false));
+      compare.addEventListener('blur', () => show(false));
+      wrap.appendChild(h('div', { className: 'compare-row' }, compare));
+      release = () => show(false);
+    }
+    return { el: wrap, release };
+  }
+
   private actions(item: Item): HTMLElement {
     const t = this.t;
     const out = item.output!;
@@ -725,6 +750,7 @@ export class App {
     if (item.decoded) URL.revokeObjectURL(item.decoded.url);
     this.cards.get(item.id)?.remove();
     this.cards.delete(item.id);
+    this.previews.delete(item.id);
     this.updateBulk();
   }
 

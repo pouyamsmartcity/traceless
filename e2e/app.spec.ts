@@ -461,6 +461,10 @@ test.describe('Pakkon', () => {
     await button.hover();
     await page.mouse.down();
     await expect(img).not.toHaveAttribute('src', safeSrc!);
+    // Background checks may refresh the card meanwhile; the preview must stay the same element.
+    await page.waitForTimeout(2500);
+    // Let go somewhere else on the page: the safe copy comes back anyway.
+    await page.mouse.move(5, 5);
     await page.mouse.up();
     await expect(img).toHaveAttribute('src', safeSrc!);
     // The save link always points at the safe copy.
