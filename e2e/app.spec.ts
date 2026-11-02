@@ -403,6 +403,21 @@ test.describe('Pakkon', () => {
     await expect(card).toContainText('photo-everything.jpg');
   });
 
+  test('offers to cover the chat header (contact name and picture) of a screenshot', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-faces').uncheck();
+    await page.getByTestId('opt-plates').uncheck();
+    await addFile(page, fixture('real/phone-screenshot.png'));
+    const item = await readyItem(page);
+    await item.getByTestId('cover-chat-header').click();
+    await readyItem(page);
+    // The whole top quarter (status bar and header) is covered; once covered, both buttons disappear.
+    expect((await regionColor(page, { x: 0, y: 0, w: 1080, h: 260 })).max).toBeLessThan(8);
+    await expect(item.getByTestId('cover-chat-header')).toHaveCount(0);
+    await expect(item.getByTestId('cover-status-bar')).toHaveCount(0);
+    expect((await regionColor(page, { x: 100, y: 320, w: 200, h: 60 })).max).toBeGreaterThan(200);
+  });
+
   test('a cover can be drawn by hand', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('leaky/screenshot-leaky.png'));

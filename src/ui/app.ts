@@ -1,4 +1,5 @@
 import { Detector } from '../lib/detect/detector';
+import type { Rect } from '../lib/detect/geometry';
 import type { Finding } from '../lib/findings';
 import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon } from './dom';
@@ -543,11 +544,16 @@ export class App {
         if (await openEditor(item, this.settings, t)) await this.refresh(item, true);
       });
       row.appendChild(edit);
-      const bar = statusBarRect(item);
-      if (bar && !item.manual.some((m) => m.y === 0 && m.x === 0 && m.w === bar.w && m.h === bar.h)) {
-        const cover = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'cover-status-bar' }, t.coverStatusBar);
+      // Phone screenshots: one tap covers the status bar, or the whole chat header with the contact's name and picture.
+      const tops: [Rect | undefined, string, string][] = [
+        [statusBarRect(item), t.coverStatusBar, 'cover-status-bar'],
+        [chatHeaderRect(item), t.coverChatHeader, 'cover-chat-header'],
+      ];
+      for (const [rect, label, id] of tops) {
+        if (!rect || item.manual.some((m) => m.x === 0 && m.y === 0 && m.w === rect.w && m.h >= rect.h)) continue;
+        const cover = h('button', { type: 'button', className: 'btn ghost', 'data-testid': id }, label);
         cover.addEventListener('click', async () => {
-          item.manual.push(bar);
+          item.manual.push(rect);
           await this.refresh(item, true);
         });
         row.appendChild(cover);
@@ -648,6 +654,13 @@ export function statusBarRect(item: Item): { x: number; y: number; w: number; h:
   if (d.height / d.width < 1.7) return undefined;
   // 12% of the width covers the tallest status bars (iPhones with a notch or Dynamic Island).
   return { x: 0, y: 0, w: d.width, h: Math.round(d.width * 0.12) };
+}
+
+/** For a phone screenshot, the top of the screen including a chat header (contact name and picture). */
+export function chatHeaderRect(item: Item): Rect | undefined {
+  const bar = statusBarRect(item);
+  // Messenger headers end about 20-24% of the screen width from the top (status bar + title bar).
+  return bar ? { x: 0, y: 0, w: bar.w, h: Math.round(bar.w * 0.25) } : undefined;
 }
 
 function canShareFiles(files: File[]): boolean {
