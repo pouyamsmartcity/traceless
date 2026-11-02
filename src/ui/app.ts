@@ -11,7 +11,7 @@ interface Settings extends Options {
 }
 
 function loadSettings(): Settings {
-  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false };
+  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false, voice: false };
   try {
     const raw = localStorage.getItem('pakkon-settings');
     if (raw) {
@@ -23,6 +23,7 @@ function loadSettings(): Settings {
         extra: s.extra === true,
         text: s.text === true,
         mute: s.mute === true,
+        voice: s.voice === true,
       };
     }
   } catch {
@@ -144,7 +145,7 @@ export class App {
     });
     const touch = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 
-    const toggle = (key: 'faces' | 'plates' | 'text' | 'extra' | 'mute', label: string) => {
+    const toggle = (key: 'faces' | 'plates' | 'text' | 'extra' | 'mute' | 'voice', label: string) => {
       const box = h('input', { type: 'checkbox', checked: this.settings[key], 'data-testid': `opt-${key}` });
       box.addEventListener('change', () => {
         this.settings[key] = box.checked;
@@ -189,7 +190,7 @@ export class App {
       h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
       touch ? h('label', { className: 'pick-btn secondary', 'data-testid': 'camera-button' }, camera, icon(ICONS.camera, 24), h('span', {}, t.takePhoto)) : null,
       touch ? h('p', { className: 'hint small' }, t.takePhotoHint) : h('p', { className: 'hint' }, t.pickHint),
-      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('text', t.optText), toggle('mute', t.optMute), toggle('extra', t.optExtra)),
+      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates), toggle('text', t.optText), toggle('voice', t.optVoice), toggle('mute', t.optMute), toggle('extra', t.optExtra)),
       h('p', { className: 'hint small' }, t.extraHint),
     );
     this.bindDrop(dropZone);
@@ -340,10 +341,25 @@ export class App {
         leftovers: t.errLeftovers,
         video: t.errVideo,
         videoMask: t.errVideoMask,
+        voice: t.errVoice,
         cancelled: t.errCancelled,
         generic: t.errGeneric,
       }[item.error ?? 'generic'];
       body.appendChild(h('p', { className: 'error', role: 'alert', 'data-testid': 'item-error' }, msg));
+      if (item.error === 'voice') {
+        const choose = (o: 'mute' | 'keep', label: string, id: string) => {
+          const b = h('button', { type: 'button', className: 'btn', 'data-testid': id }, label);
+          b.addEventListener('click', () => {
+            item.soundOverride = o;
+            item.status = 'queued';
+            delete item.error;
+            this.updateCard(item);
+            this.enqueue(item);
+          });
+          return b;
+        };
+        body.appendChild(h('div', { className: 'actions' }, choose('mute', t.voiceInsteadMute, 'voice-mute'), choose('keep', t.voiceKeep, 'voice-keep')));
+      }
       if (item.error === 'videoMask') {
         const go = h('button', { type: 'button', className: 'btn', 'data-testid': 'continue-without' }, t.continueWithout);
         go.addEventListener('click', () => {
@@ -393,12 +409,14 @@ export class App {
         body.appendChild(h('p', { className: item.videoMasks === 'covered' ? 'note' : 'warn', 'data-testid': 'video-masks', 'data-state': item.videoMasks ?? 'off' }, videoNote));
         if (item.droppedTracks > 0) body.appendChild(h('p', { className: 'note' }, t.videoDropped(item.droppedTracks)));
         if (item.videoMadeWith?.mute) body.appendChild(h('p', { className: 'note', 'data-testid': 'muted-note' }, t.videoMuted));
+        if (item.videoMadeWith?.voice) body.appendChild(h('p', { className: 'note', 'data-testid': 'voice-note' }, t.videoVoiced));
         if (!sameVideoOptions(item.videoMadeWith, this.settings)) {
           const again = h('button', { type: 'button', className: 'btn ghost small', 'data-testid': 'rebuild' }, t.rebuildVideo);
           again.addEventListener('click', () => {
             if (item.output) URL.revokeObjectURL(item.output.url);
             delete item.output;
             delete item.skipVideoMasks;
+            delete item.soundOverride;
             item.status = 'queued';
             this.updateCard(item);
             this.enqueue(item);

@@ -14,7 +14,7 @@ import {
 } from 'mediabunny';
 import { sourceFromBlob } from './bytes';
 import { assertSaneMovie, inspectVideo } from './bmff';
-import { finishVideo, type CleanVideoResult } from './clean-video';
+import { finishVideo, soundConversion, type CleanVideoResult } from './clean-video';
 import type { Detector } from './detect/detector';
 import { MASK_COLOR } from './clean-image';
 import { masksAt, sampleTimes, type TimedBoxes } from './video-timeline';
@@ -34,6 +34,8 @@ export interface MaskedVideoOptions {
   text?: boolean;
   /** Leave the sound out. */
   mute?: boolean;
+  /** Change voices. */
+  voice?: boolean;
   onProgress?: (phase: 'detect' | 'encode', fraction: number) => void;
   signal?: AbortSignal;
 }
@@ -121,7 +123,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       tracks: 'primary',
       tags: {},
       showWarnings: false,
-      ...(opts.mute ? { audio: { discard: true } } : {}),
+      ...(await soundConversion({ mute: opts.mute ?? false, voice: opts.voice ?? false })),
       trim: { start: shift },
       video: {
         codec: 'avc',

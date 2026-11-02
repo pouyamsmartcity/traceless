@@ -468,6 +468,50 @@ test.describe('Pakkon', () => {
     }
   });
 
+  test('changes voices in a video: the sound is kept but its pitch is lower', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-voice').check();
+    await addFile(page, fixture('real/astronaut-pan.mp4'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('voice-note')).toBeVisible();
+    const { bytes } = await outputBytes(page);
+    expect((await inspectVideo(sourceFromBytes(bytes))).tracks.sort()).toEqual(['soun', 'vide']);
+    // The test video's sound is a 330 Hz tone; measure the pitch of the new sound in the browser.
+    const href = await item.getByTestId('save').getAttribute('href');
+    const hz = await page.evaluate(async (url) => {
+      const buf = await (await fetch(url!)).arrayBuffer();
+      const audio = await new OfflineAudioContext(1, 48000, 48000).decodeAudioData(buf);
+      const x = audio.getChannelData(0);
+      const start = Math.floor(audio.sampleRate * 0.3);
+      const end = Math.floor(audio.sampleRate * 1.8);
+      let n = 0;
+      for (let i = start + 1; i < end; i++) if (x[i - 1]! < 0 && x[i]! >= 0) n++;
+      return n / ((end - start) / audio.sampleRate);
+    }, href);
+    expect(hz).toBeGreaterThan(330 * 0.7);
+    expect(hz).toBeLessThan(330 * 0.84);
+  });
+
+  test('if voices cannot be changed here, the user chooses: remove the sound or keep it', async ({ page }) => {
+    await page.addInitScript(() => {
+      // Simulate a browser without an audio encoder.
+      Object.defineProperty(window, 'AudioEncoder', { value: undefined });
+    });
+    await page.goto('/');
+    await page.getByTestId('opt-voice').check();
+    await page.getByTestId('opt-faces').uncheck();
+    await page.getByTestId('opt-plates').uncheck();
+    await addFile(page, fixture('real/astronaut-pan.mp4'));
+    const item = page.getByTestId('item').first();
+    await expect(item.getByTestId('voice-mute')).toBeVisible({ timeout: 60_000 });
+    await expect(item.getByTestId('save')).toHaveCount(0);
+    await item.getByTestId('voice-mute').click();
+    await readyItem(page);
+    await expect(item.getByTestId('muted-note')).toBeVisible();
+    const { bytes } = await outputBytes(page);
+    expect((await inspectVideo(sourceFromBytes(bytes))).tracks).toEqual(['vide']);
+  });
+
   test('with covering switched off, a video is only re-packaged', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('opt-faces').uncheck();

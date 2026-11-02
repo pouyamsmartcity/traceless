@@ -17,7 +17,12 @@ which device a picture was taken, and covers faces and licence plates with solid
   too; tap a cover to keep a piece of text visible.
 - **Extra protection on request.** Makes it much harder to link a photo to a camera through its sensor's noise
   pattern (smaller, very slightly turned and trimmed picture, fresh grain).
-- **Remove the sound** from videos on request (voices and background sounds can identify people and places).
+- **Change voices or remove the sound** in videos on request (voices and background sounds can identify people
+  and places). Voices are made deeper by a random factor; words and accents stay.
+- **Take photos inside Pakkon** on phones, so the original never lands in the gallery.
+- **Warnings and hints:** "this photo may show where it was taken" when signs, writing or plates stay uncovered;
+  "at least N people are visible" for crowds; and for photos you receive, signs of editing (editor name, changed
+  dates, a hidden thumbnail that shows a different or uncropped picture), as hints, never proof.
 - **Fails safe.** If finding faces or covering a video fails, no copy is offered until you cover things by hand or
   explicitly continue without covering. Every output is checked again before you get it.
 - **A checklist before sending** for what software cannot judge: reflections, signs, tattoos, shadows, voices.
@@ -41,8 +46,9 @@ Pakkon never claims a file is "100% safe". It does not hide:
   20 px;
 - the camera sensor's noise pattern (PRNU), which can link photos to the same camera ("extra protection" makes this
   much harder, not impossible);
-- **voices** and background sounds in videos;
-- faces in videos on devices that cannot re-encode video (the app says so), and text in videos;
+- **words, accents and background sounds** in videos (voices can be changed or the sound removed);
+- faces, plates and text in videos on devices that cannot re-encode video (the app says so and makes no copy
+  until you decide);
 - copies already sent, or data a messenger adds afterwards.
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the full security and privacy model, including how each claim is

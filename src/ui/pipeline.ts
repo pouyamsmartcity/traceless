@@ -8,7 +8,7 @@ import type { Finding } from '../lib/findings';
 import { inspectImage, sniffImage, type Hint } from '../lib/inspect-image';
 
 export type ItemStatus = 'queued' | 'reading' | 'detecting' | 'cleaning' | 'ready' | 'error';
-export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'videoMask' | 'cancelled' | 'generic';
+export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'videoMask' | 'voice' | 'cancelled' | 'generic';
 
 export interface Item {
   id: number;
@@ -50,6 +50,8 @@ export interface Item {
   skipVideoMasks?: boolean;
   /** Video: the options its safe copy was made with. */
   videoMadeWith?: VideoOptions;
+  /** Video: the user's choice after a voice change was not possible on this device. */
+  soundOverride?: 'mute' | 'keep';
   error?: ErrorKind;
   /** Technical detail of an error, shown so a user can report it (never contains file contents). */
   errorDetail?: string;
@@ -64,10 +66,13 @@ export interface Options {
   text: boolean;
   /** Leave the sound out of videos. */
   mute: boolean;
+  /** Change voices in videos. */
+  voice: boolean;
 }
 
 /** The options a video was made with (shown on its card; a rebuild is offered when they change). */
 export interface VideoOptions {
+  voice: boolean;
   text: boolean;
   faces: boolean;
   plates: boolean;
@@ -172,6 +177,7 @@ function errorKind(e: unknown): ErrorKind {
   }
   if (e instanceof VideoCleanError) {
     if (e.reason === 'cannotMask') return 'videoMask';
+    if (e.reason === 'cannotVoice') return 'voice';
     return e.reason === 'leftovers' ? 'leftovers' : e.reason === 'cancelled' ? 'cancelled' : 'video';
   }
   if (e instanceof RangeError) return 'tooLarge';
@@ -186,7 +192,7 @@ function setOutput(item: Item, blob: Blob, ext: string): void {
 /** Builds (or rebuilds after editing) the safe copy of an image whose detections are known. */
 export async function renderImage(item: Item, opts: Options): Promise<void> {
   if (!item.decoded || !item.outputType) throw new Error('image not decoded');
-  const snapshot: Options = { faces: opts.faces, plates: opts.plates, text: opts.text, extra: opts.extra, mute: opts.mute };
+  const snapshot: Options = { ...opts };
   const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra });
   const type = item.outputType;
   const ext = type === 'image/png' ? 'png' : 'jpg';
@@ -198,7 +204,7 @@ export async function renderImage(item: Item, opts: Options): Promise<void> {
 }
 
 export function sameVideoOptions(a: VideoOptions | undefined, b: Options): boolean {
-  return !!a && a.faces === b.faces && a.plates === b.plates && a.text === b.text && a.mute === b.mute;
+  return !!a && a.faces === b.faces && a.plates === b.plates && a.text === b.text && a.mute === b.mute && a.voice === (b.voice && !b.mute);
 }
 
 export function sameOptions(a: Options | undefined, b: Options): boolean {
@@ -227,6 +233,8 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
       // The video code is large, so it is only loaded when a video is added.
       const { cleanVideo } = await import('../lib/clean-video');
       let bytes: Uint8Array | undefined;
+      const mute = item.soundOverride === 'mute' || opts.mute;
+      const voice = !mute && item.soundOverride !== 'keep' && opts.voice;
       if ((opts.faces || opts.plates || opts.text) && !item.skipVideoMasks) {
         const { cleanVideoWithMasks } = await import('../lib/video-mask');
         item.abort = new AbortController();
@@ -236,7 +244,8 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
             faces: opts.faces,
             plates: opts.plates,
             text: opts.text,
-            mute: opts.mute,
+            mute,
+            voice,
             signal: item.abort.signal,
             onProgress: (phase, p) => set(phase === 'detect' ? 'detecting' : 'cleaning', p),
           });
@@ -245,8 +254,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
           item.videoMasks = 'covered';
           item.videoObjects = r.maxObjects;
         } catch (e) {
-          // Covering was asked for but could not be done: deliver nothing until the user decides.
-          if (e instanceof VideoCleanError && e.reason === 'cannotMask') throw new VideoCleanError('cannotMask', e.message);
+          // Covering (or a voice change) was asked for but could not be done: deliver nothing until the user decides.
           throw e;
         } finally {
           delete item.abort;
@@ -256,12 +264,12 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
       }
       if (!bytes) {
         set('cleaning', 0);
-        const result = await cleanVideo(item.file, (p) => set('cleaning', p), { mute: opts.mute });
+        const result = await cleanVideo(item.file, (p) => set('cleaning', p), { mute, voice });
         bytes = result.bytes;
         item.droppedTracks = result.droppedTracks;
       }
       const covered = !item.skipVideoMasks;
-      item.videoMadeWith = { faces: opts.faces && covered, plates: opts.plates && covered, text: opts.text && covered, mute: opts.mute };
+      item.videoMadeWith = { faces: opts.faces && covered, plates: opts.plates && covered, text: opts.text && covered, mute, voice };
       setOutput(item, new Blob([bytes as BlobPart], { type: 'video/mp4' }), 'mp4');
       item.output!.name = item.output!.name.replace(/^img-/, 'vid-');
     } else {

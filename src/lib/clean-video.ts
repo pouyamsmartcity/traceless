@@ -1,10 +1,70 @@
-import { ALL_FORMATS, BlobSource, BufferTarget, Conversion, Input, Mp4OutputFormat, Output } from 'mediabunny';
+import {
+  ALL_FORMATS,
+  AudioSample,
+  BlobSource,
+  BufferTarget,
+  Conversion,
+  Input,
+  Mp4OutputFormat,
+  Output,
+  canEncodeAudio,
+  type ConversionAudioOptions,
+} from 'mediabunny';
+import { PitchShifter, randomVoiceRatio } from './voice';
 import { sourceFromBlob, sourceFromBytes } from './bytes';
 import { assertSaneMovie, inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
 import { sanitizeMp4, streamLeftovers } from './sanitize-video';
 import { VideoCleanError } from './video-errors';
 
 export { VideoCleanError };
+
+export interface SoundOptions {
+  /** Leave the sound out. */
+  mute?: boolean;
+  /** Change voices (lower pitch and formants by a random factor). Ignored when `mute` is set. */
+  voice?: boolean;
+}
+
+function cryptoRand(): number {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0]! / 2 ** 32;
+}
+
+/**
+ * How the sound is handled: copied unchanged, left out, or re-encoded with changed voices.
+ * Throws VideoCleanError('cannotVoice') when voices should change but this browser cannot encode audio.
+ */
+export async function soundConversion(opts: SoundOptions): Promise<{ audio?: ConversionAudioOptions }> {
+  if (opts.mute) return { audio: { discard: true } };
+  if (!opts.voice) return {};
+  if (typeof AudioEncoder === 'undefined') throw new VideoCleanError('cannotVoice', 'no audio encoder');
+  const codec = (await canEncodeAudio('aac').catch(() => false)) ? 'aac' : (await canEncodeAudio('opus').catch(() => false)) ? 'opus' : null;
+  if (!codec) throw new VideoCleanError('cannotVoice', 'no AAC or Opus encoder');
+  const ratio = randomVoiceRatio(cryptoRand);
+  let shifter: PitchShifter | undefined;
+  return {
+    audio: {
+      codec,
+      forceTranscode: true,
+      process: (sample: AudioSample) => {
+        const channels = sample.numberOfChannels;
+        const frames = sample.numberOfFrames;
+        shifter ??= new PitchShifter(ratio, sample.sampleRate, channels);
+        const planes: Float32Array[] = [];
+        for (let c = 0; c < channels; c++) {
+          const plane = new Float32Array(frames);
+          sample.copyTo(plane, { planeIndex: c, format: 'f32-planar' });
+          planes.push(plane);
+        }
+        const out = shifter.process(planes);
+        const data = new Float32Array(frames * channels);
+        out.forEach((p, c) => data.set(p, c * frames));
+        return new AudioSample({ data, format: 'f32-planar', numberOfChannels: channels, sampleRate: sample.sampleRate, timestamp: sample.timestamp });
+      },
+    },
+  };
+}
 
 export interface CleanVideoResult {
   bytes: Uint8Array;
@@ -21,7 +81,7 @@ export interface CleanVideoResult {
 export async function cleanVideo(
   file: Blob,
   onProgress?: (fraction: number) => void,
-  opts: { mute?: boolean } = {},
+  opts: SoundOptions = {},
 ): Promise<CleanVideoResult> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
@@ -49,8 +109,8 @@ export async function cleanVideo(
       tracks: 'primary',
       tags: {},
       showWarnings: false,
-      // Voices and background sounds can identify people and places: the sound can be left out entirely.
-      ...(opts.mute ? { audio: { discard: true } } : {}),
+      // Voices and background sounds can identify people and places: sound can be left out or changed.
+      ...(await soundConversion(opts)),
     });
     const keptVideo = conversion.utilizedTracks.some((t) => t.isVideoTrack());
     if (!conversion.isValid || !keptVideo) {

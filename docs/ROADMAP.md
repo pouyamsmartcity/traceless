@@ -1,5 +1,9 @@
 # Ideas for the next versions
 
+Done since this list was written: voice change in videos (1), text covering in videos (2), location risk warning
+(5, first version), camera mode (10), edit hints for received photos (13/14, first version), crowd count (17, as a
+lower bound from faces).
+
 Twenty ideas, grouped by how well they fit Pakkon's purpose: protecting the people in and behind a photo or video.
 Each needs the same treatment as v0.1: tests with real and hostile files, and honest limits in the interface.
 
