@@ -56,7 +56,7 @@ const MAX_VIDEO_BYTES = 2 * 1024 ** 3;
 
 export function isVideoFile(file: File): boolean {
   if (file.type.startsWith('video/')) return true;
-  return /\.(mp4|m4v|mov|3gp|qt)$/i.test(file.name);
+  return /\.(mp4|m4v|mov|3gp|qt|mts|m2ts|ts|mkv|webm)$/i.test(file.name);
 }
 
 export function newItem(file: File): Item {

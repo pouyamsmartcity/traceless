@@ -320,6 +320,19 @@ test.describe('Pakkon', () => {
     });
   }
 
+  test('masks line up in a camcorder-style file whose timestamps start late (fast movement)', async ({ page }) => {
+    await page.goto('/');
+    // MPEG-TS starting at about 1.5 s; the face (centre x = 449 - 150 t, y = 237) crosses the frame quickly.
+    await addFile(page, fixture('real/astronaut-fast.m2ts'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('video-masks')).toHaveAttribute('data-state', 'covered');
+    for (const t of [0.6, 1.2, 1.8, 2.4]) {
+      const cx = Math.round(449 - 150 * t);
+      const face = await videoRegion(page, t, { x: cx - 20, y: 217, w: 40, h: 40 });
+      expect(face.max, `face visible at ${t}s`).toBeLessThan(40);
+    }
+  });
+
   test('with covering switched off, a video is only re-packaged', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('opt-faces').uncheck();

@@ -13,8 +13,8 @@ import {
   type VideoSample,
 } from 'mediabunny';
 import { sourceFromBlob } from './bytes';
-import { inspectVideo, zeroMovieTimes } from './bmff';
-import { videoLeftovers, type CleanVideoResult } from './clean-video';
+import { inspectVideo } from './bmff';
+import { finishVideo, type CleanVideoResult } from './clean-video';
 import type { Detector } from './detect/detector';
 import { MASK_COLOR } from './clean-image';
 import { masksAt, sampleTimes, type TimedBoxes } from './video-timeline';
@@ -65,6 +65,10 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
 
     // Pass 1: look for faces and plates in sampled frames (display orientation).
     const start = await track.getFirstTimestamp();
+    // The new file starts at 0; frames are shifted by the start of the kept tracks. Pass 1 works on original
+    // times, so pass 2 adds this shift back before looking up masks (camcorder .mts/.ts files start late).
+    const audio = await input.getPrimaryAudioTrack().catch(() => null);
+    const shift = Math.max(0, await input.getFirstTimestamp(audio ? [track, audio] : [track]));
     const end = await track.computeDuration();
     const times = sampleTimes(start, end, SAMPLE_STEP);
     const scale = Math.min(1, DETECT_SIDE / Math.max(W, H));
@@ -110,6 +114,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       tracks: 'primary',
       tags: {},
       showWarnings: false,
+      trim: { start: shift },
       video: {
         codec: 'avc',
         // The new video is built in memory: long videos use a lower bitrate so phones do not run out.
@@ -130,7 +135,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
           const fx = sw / W;
           const fy = sh / H;
           ctx.fillStyle = MASK_COLOR;
-          for (const m of masksAt(timeline, sample.timestamp, W, H)) {
+          for (const m of masksAt(timeline, sample.timestamp + shift, W, H)) {
             const x = Math.floor(m.x * fx);
             const y = Math.floor(m.y * fy);
             ctx.fillRect(x, y, Math.ceil((m.x + m.w) * fx) - x, Math.ceil((m.y + m.h) * fy) - y);
@@ -155,10 +160,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
     }
     const buffer = target.buffer;
     if (!buffer) throw new VideoCleanError('failed', 'no output');
-    const bytes = new Uint8Array(buffer);
-    zeroMovieTimes(bytes);
-    const leftovers = await videoLeftovers(bytes);
-    if (leftovers.length) throw new VideoCleanError('leftovers', leftovers.join('; '));
+    const bytes = await finishVideo(new Uint8Array(buffer));
     const before = await inspectVideo(sourceFromBlob(file));
     return {
       bytes,

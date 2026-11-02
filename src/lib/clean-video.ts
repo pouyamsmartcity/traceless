@@ -1,6 +1,7 @@
 import { ALL_FORMATS, BlobSource, BufferTarget, Conversion, Input, Mp4OutputFormat, Output } from 'mediabunny';
 import { sourceFromBlob, sourceFromBytes } from './bytes';
-import { inspectVideo, zeroMovieTimes } from './bmff';
+import { inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
+import { sanitizeMp4, streamLeftovers } from './sanitize-video';
 import { VideoCleanError } from './video-errors';
 
 export { VideoCleanError };
@@ -55,14 +56,24 @@ export async function cleanVideo(
     }
     const buffer = target.buffer;
     if (!buffer) throw new VideoCleanError('failed', 'no output');
-    const bytes = new Uint8Array(buffer);
-    zeroMovieTimes(bytes);
-    const leftovers = await videoLeftovers(bytes);
-    if (leftovers.length) throw new VideoCleanError('leftovers', leftovers.join('; '));
+    const bytes = await finishVideo(new Uint8Array(buffer));
     return { bytes, droppedTracks: Math.max(0, before.tracks.length - conversion.utilizedTracks.length) };
   } finally {
     input.dispose();
   }
+}
+
+/**
+ * Last step for every video we make: rebuild it without track names, tags or metadata units in the video
+ * stream, zero the dates our writer stamps in, and check the result three independent ways.
+ * Throws instead of returning anything that fails a check.
+ */
+export async function finishVideo(converted: Uint8Array): Promise<Uint8Array> {
+  const bytes = await sanitizeMp4(converted);
+  zeroMovieTimes(bytes);
+  const leftovers = await videoLeftovers(bytes);
+  if (leftovers.length) throw new VideoCleanError('leftovers', leftovers.join('; '));
+  return bytes;
 }
 
 /** Independent check of a cleaned video. Returns what is still revealing, or an empty list. */
@@ -71,5 +82,7 @@ export async function videoLeftovers(bytes: Uint8Array): Promise<string[]> {
   if (r.partial) return ['could not read the output file'];
   const problems = r.findings.map((f) => (f.value ? `${f.id}: ${f.value}` : f.id));
   if (r.tracks.length === 0 || r.tracks.length > 2) problems.push(`tracks: ${r.tracks.join(',')}`);
+  problems.push(...outputBoxProblems(bytes));
+  problems.push(...(await streamLeftovers(bytes)));
   return problems;
 }

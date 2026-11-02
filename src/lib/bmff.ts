@@ -60,7 +60,7 @@ export function payload(b: Uint8Array, box: Box): Uint8Array {
 }
 
 /** Calls `visit` for every box in the tree under `boxes`, depth-first, with its path like "moov/trak/mdia". */
-export function walk(b: Uint8Array, boxes: Box[], visit: (box: Box, path: string) => void, path = ''): void {
+export function walk(b: Uint8Array, boxes: Box[], visit: (box: Box, path: string) => void, path = '', strict = false): void {
   for (const box of boxes) {
     const p = path ? `${path}/${box.type}` : box.type;
     visit(box, p);
@@ -68,13 +68,58 @@ export function walk(b: Uint8Array, boxes: Box[], visit: (box: Box, path: string
       let kids: Box[] = [];
       try {
         kids = children(b, box);
-      } catch {
-        // A container we cannot read is reported by the caller through other checks; skip it here.
+      } catch (e) {
+        // When inspecting a user's file, read what we can. When verifying our own output, fail.
+        if (strict) throw e;
       }
-      walk(b, kids, visit, p);
+      walk(b, kids, visit, p, strict);
     }
   }
 }
+
+/** The only boxes our cleaned MP4 files may contain. Anything else fails the final check. */
+const OUTPUT_BOXES = new Set([
+  'ftyp', 'moov', 'mdat', 'free', 'mvhd', 'trak', 'tkhd', 'edts', 'elst', 'mdia', 'mdhd', 'hdlr', 'minf',
+  'vmhd', 'smhd', 'dinf', 'dref', 'stbl', 'stsd', 'stts', 'ctts', 'cslg', 'stsc', 'stsz', 'stz2', 'stco',
+  'co64', 'stss', 'sdtp', 'sgpd', 'sbgp',
+]);
+const OUTPUT_HANDLERS = new Set(['', 'MediabunnyVideoHandler', 'MediabunnySoundHandler']);
+
+/**
+ * Strict structural check of one of our own output files: only known boxes, no names, readable throughout.
+ * Returns a list of problems (empty when the file only holds what a plain video needs).
+ */
+export function outputBoxProblems(file: Uint8Array): string[] {
+  const problems: string[] = [];
+  try {
+    const top = readBoxes(file, 0, file.length);
+    walk(
+      file,
+      top,
+      (box, path) => {
+        if (!OUTPUT_BOXES.has(box.type)) problems.push(`unexpected box ${path}`);
+        if (box.type === 'hdlr') {
+          const p = payload(file, box);
+          const name = p.length > 24 ? utf8(p.subarray(24)).replace(/\0+$/, '') : '';
+          if (!OUTPUT_HANDLERS.has(name)) problems.push(`handler name "${name}"`);
+        }
+        if (box.type === 'mdhd') {
+          const p = payload(file, box);
+          const lang = p[0] === 1 ? 32 : 20;
+          // Packed ISO-639 code: 0x55c4 is "und" (undetermined). A real language could hint at the author.
+          if (p.length >= lang + 2 && ((p[lang]! << 8) | p[lang + 1]!) !== 0x55c4) problems.push('track language set');
+        }
+      },
+      '',
+      true,
+    );
+  } catch (e) {
+    problems.push(`unreadable structure: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return problems;
+}
+
+const MAX_TOP_BOXES = 4096;
 
 /** Reads the top-level box headers of a file, then loads only 'moov' (and small metadata boxes). */
 export async function loadMovieHeader(src: ByteSource): Promise<{ top: Box[]; moov: Uint8Array; moovBoxes: Box[]; extras: string[] }> {
@@ -83,6 +128,8 @@ export async function loadMovieHeader(src: ByteSource): Promise<{ top: Box[]; mo
   let moov: Uint8Array | undefined;
   let o = 0;
   while (o + 8 <= src.size) {
+    // Real files have a handful of top-level boxes; a flood of tiny boxes is a hostile file.
+    if (top.length >= MAX_TOP_BOXES) throw new FormatError('too many top-level boxes');
     const h = await src.read(o, 16);
     let size = u32be(h, 0);
     const type = ascii(h, 4, 4);
