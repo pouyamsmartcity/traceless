@@ -300,3 +300,83 @@ export function zeroMovieTimes(file: Uint8Array): number {
   }
   return patched;
 }
+
+/** More samples than this in one track is not a real phone or camera video. */
+const MAX_SAMPLES = 20_000_000;
+
+function countEntries(b: Uint8Array, box: Box, entrySize: number, headerBytes = 8): number {
+  const p = payload(b, box);
+  if (p.length < headerBytes) throw new FormatError(`short ${box.type}`);
+  const n = u32be(p, headerBytes - 4);
+  if (headerBytes + n * entrySize > p.length) throw new FormatError(`${box.type} entries past its end`);
+  return n;
+}
+
+/**
+ * Checks that every track's sample tables are consistent with each other. Damaged tables (for example a
+ * "samples per chunk" of a billion) can make video libraries loop for minutes and freeze the page,
+ * so such files are refused up front as damaged.
+ */
+export function sampleTableProblems(moov: Uint8Array, moovBoxes: Box[]): string[] {
+  const problems: string[] = [];
+  walk(moov, moovBoxes, (box, path) => {
+    if (box.type !== 'stbl') return;
+    try {
+      const kids = children(moov, box);
+      const get = (t: string) => kids.find((k) => k.type === t);
+      const stsz = get('stsz');
+      const stco = get('stco') ?? get('co64');
+      if (!stsz || !stco) return; // fragmented files keep their tables elsewhere
+      const sp = payload(moov, stsz);
+      if (sp.length < 12) throw new FormatError('short stsz');
+      const fixedSize = u32be(sp, 4);
+      const samples = u32be(sp, 8);
+      if (samples > MAX_SAMPLES) throw new FormatError('too many samples');
+      if (fixedSize === 0 && 12 + samples * 4 > sp.length) throw new FormatError('stsz entries past its end');
+      const chunks = countEntries(moov, stco, stco.type === 'co64' ? 8 : 4);
+      const stsc = get('stsc');
+      if (stsc) {
+        const n = countEntries(moov, stsc, 12);
+        const p = payload(moov, stsc);
+        let prevFirst = 0;
+        for (let i = 0; i < n; i++) {
+          const first = u32be(p, 8 + i * 12);
+          const perChunk = u32be(p, 12 + i * 12);
+          if (first < 1 || first <= prevFirst || first > chunks) throw new FormatError('stsc chunk index out of order');
+          if (perChunk < 1 || perChunk > samples) throw new FormatError('stsc samples per chunk out of range');
+          prevFirst = first;
+        }
+      }
+      const stts = get('stts');
+      if (stts) {
+        const n = countEntries(moov, stts, 8);
+        const p = payload(moov, stts);
+        let total = 0;
+        for (let i = 0; i < n; i++) total += u32be(p, 8 + i * 8);
+        if (total > samples + 1) throw new FormatError('stts counts more samples than stsz');
+      }
+      const ctts = get('ctts');
+      if (ctts) {
+        const n = countEntries(moov, ctts, 8);
+        const p = payload(moov, ctts);
+        let total = 0;
+        for (let i = 0; i < n; i++) total += u32be(p, 8 + i * 8);
+        if (total > samples + 1) throw new FormatError('ctts counts more samples than stsz');
+      }
+      const stss = get('stss');
+      if (stss) countEntries(moov, stss, 4);
+    } catch (e) {
+      problems.push(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  });
+  return problems;
+}
+
+/** Refuses MP4/MOV files whose structure is damaged in ways that could freeze the page. Other formats pass. */
+export async function assertSaneMovie(src: ByteSource): Promise<void> {
+  const head = await src.read(0, 12);
+  if (head.length < 8 || ascii(head, 4, 4) !== 'ftyp') return; // not MP4/MOV: left to the video library
+  const { moov, moovBoxes } = await loadMovieHeader(src);
+  const problems = sampleTableProblems(moov, moovBoxes);
+  if (problems.length) throw new FormatError(`damaged video: ${problems[0]}`);
+}

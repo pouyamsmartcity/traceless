@@ -1,6 +1,6 @@
 import { ALL_FORMATS, BlobSource, BufferTarget, Conversion, Input, Mp4OutputFormat, Output } from 'mediabunny';
 import { sourceFromBlob, sourceFromBytes } from './bytes';
-import { inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
+import { assertSaneMovie, inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
 import { sanitizeMp4, streamLeftovers } from './sanitize-video';
 import { VideoCleanError } from './video-errors';
 
@@ -31,6 +31,11 @@ export async function cleanVideo(
       throw new VideoCleanError('unsupported', 'unknown video format');
     }
     if (!format) throw new VideoCleanError('unsupported', 'unknown video format');
+    try {
+      await assertSaneMovie(sourceFromBlob(file));
+    } catch (e) {
+      throw new VideoCleanError('unsupported', e instanceof Error ? e.message : String(e));
+    }
     const before = await inspectVideo(sourceFromBlob(file));
     const target = new BufferTarget();
     const output = new Output({

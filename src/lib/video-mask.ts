@@ -13,7 +13,7 @@ import {
   type VideoSample,
 } from 'mediabunny';
 import { sourceFromBlob } from './bytes';
-import { inspectVideo } from './bmff';
+import { assertSaneMovie, inspectVideo } from './bmff';
 import { finishVideo, type CleanVideoResult } from './clean-video';
 import type { Detector } from './detect/detector';
 import { MASK_COLOR } from './clean-image';
@@ -54,6 +54,11 @@ function checkAbort(signal?: AbortSignal): void {
 export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: MaskedVideoOptions): Promise<MaskedVideoResult> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
+    try {
+      await assertSaneMovie(sourceFromBlob(file));
+    } catch (e) {
+      throw new VideoCleanError('unsupported', e instanceof Error ? e.message : String(e));
+    }
     const track = await input.getPrimaryVideoTrack().catch(() => null);
     if (!track) throw new VideoCleanError('noVideo', 'no video track');
     const W = await track.getDisplayWidth();
