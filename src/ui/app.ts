@@ -281,6 +281,7 @@ export class App {
         tooLarge: t.errTooLarge,
         leftovers: t.errLeftovers,
         video: t.errVideo,
+        cancelled: t.errCancelled,
         generic: t.errGeneric,
       }[item.error ?? 'generic'];
       body.appendChild(h('p', { className: 'error', role: 'alert', 'data-testid': 'item-error' }, msg));
@@ -290,6 +291,11 @@ export class App {
       body.appendChild(
         h('p', { className: `status ${item.status}`, 'data-testid': 'item-status' }, item.status === 'ready' ? icon(ICONS.check, 18) : null, this.statusText(item) + pct),
       );
+      if (item.abort) {
+        const cancel = h('button', { type: 'button', className: 'btn ghost small', 'data-testid': 'cancel' }, t.cancel);
+        cancel.addEventListener('click', () => item.abort?.abort());
+        body.appendChild(cancel);
+      }
     }
 
     if (item.status === 'ready' && item.output) {
@@ -300,7 +306,8 @@ export class App {
         if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
         body.appendChild(h('p', { className: 'note' }, t.checkPicture));
       } else {
-        body.appendChild(h('p', { className: 'warn' }, t.videoNoMasks));
+        const videoNote = { covered: t.videoCovered, off: t.videoMasksOff, unavailable: t.videoMasksUnavailable }[item.videoMasks ?? 'off'];
+        body.appendChild(h('p', { className: item.videoMasks === 'covered' ? 'note' : 'warn', 'data-testid': 'video-masks', 'data-state': item.videoMasks ?? 'off' }, videoNote));
         if (item.droppedTracks > 0) body.appendChild(h('p', { className: 'note' }, t.videoDropped(item.droppedTracks)));
       }
       body.appendChild(this.actions(item));

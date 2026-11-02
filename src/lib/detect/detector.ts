@@ -13,14 +13,30 @@ const INFER_TIMEOUT_MS = 120_000;
 export interface DetectOptions {
   faces: boolean;
   plates: boolean;
+  /** Fewer passes, for video frames: one look at the whole frame, plus face tiles for large frames. */
+  quick?: boolean;
   onProgress?: (fraction: number) => void;
 }
 
 type Pass = { model: ModelId; region: Rect };
 
 /** Plans which regions of a w x h image each model looks at. Exported for tests. */
-export function planPasses(w: number, h: number, opts: { faces: boolean; plates: boolean }): Pass[] {
+export function planPasses(w: number, h: number, opts: { faces: boolean; plates: boolean; quick?: boolean }): Pass[] {
   const scale = Math.min(1, DETECT_MAX_SIDE / Math.max(w, h));
+  if (opts.quick) {
+    const full: Rect = { x: 0, y: 0, w, h };
+    const passes: Pass[] = [];
+    if (opts.faces) {
+      passes.push({ model: 'face', region: full });
+      if (Math.max(w, h) * scale > 1.5 * MODELS.face.size) {
+        for (const t of tiles(w * scale, h * scale, 1.5 * MODELS.face.size, 0.2)) {
+          passes.push({ model: 'face', region: { x: t.x / scale, y: t.y / scale, w: t.w / scale, h: t.h / scale } });
+        }
+      }
+    }
+    if (opts.plates) passes.push({ model: 'plate', region: full });
+    return passes;
+  }
   const dw = w * scale;
   const dh = h * scale;
   const full: Rect = { x: 0, y: 0, w, h };

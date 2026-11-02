@@ -64,6 +64,38 @@ async function regionColor(page: Page, rect: { x: number; y: number; w: number; 
   );
 }
 
+/** Average colour and brightest channel of a rectangle of the output video at time t (seconds). */
+async function videoRegion(page: Page, t: number, rect: { x: number; y: number; w: number; h: number }) {
+  const href = await page.getByTestId('item').first().getByTestId('save').getAttribute('href');
+  return page.evaluate(
+    async ({ url, t, rect }) => {
+      const v = document.createElement('video');
+      v.muted = true;
+      v.src = url!;
+      await new Promise((r, e) => {
+        v.onloadeddata = r;
+        v.onerror = e;
+      });
+      v.currentTime = t;
+      await new Promise((r) => (v.onseeked = r));
+      const c = document.createElement('canvas');
+      c.width = v.videoWidth;
+      c.height = v.videoHeight;
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(v, 0, 0);
+      const d = ctx.getImageData(rect.x, rect.y, rect.w, rect.h).data;
+      let max = 0;
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        max = Math.max(max, d[i]!, d[i + 1]!, d[i + 2]!);
+        sum += d[i]! + d[i + 1]! + d[i + 2]!;
+      }
+      return { max, mean: sum / (d.length * 0.75), width: v.videoWidth, height: v.videoHeight };
+    },
+    { url: href, t, rect },
+  );
+}
+
 test.describe('Pakkon', () => {
   test('loads in Persian with a strict content security policy', async ({ page }) => {
     const foreign = watchNetwork(page);
@@ -195,6 +227,42 @@ test.describe('Pakkon', () => {
     expect(r.findings).toEqual([]);
     expect(r.tracks.sort()).toEqual(['soun', 'vide']);
     expect(foreign).toEqual([]);
+  });
+
+  for (const name of ['astronaut-pan.mp4', 'astronaut-pan-rotated.mp4']) {
+    test(`covers a moving face in every part of a video (${name})`, async ({ page }) => {
+      const foreign = watchNetwork(page);
+      await page.goto('/');
+      await addFile(page, fixture(`real/${name}`));
+      const item = await readyItem(page);
+      await expect(item.getByTestId('video-masks')).toHaveAttribute('data-state', 'covered');
+      const { bytes } = await outputBytes(page);
+      const r = await inspectVideo(sourceFromBytes(bytes));
+      expect(r.findings).toEqual([]);
+      expect(r.tracks.sort()).toEqual(['soun', 'vide']);
+      // The face moves left by 30 px/s: centre x = 224 - 30t, y = 118 (display pixels of a 400x400 frame).
+      for (const t of [0.1, 0.8, 1.5, 2.2, 2.9]) {
+        const cx = Math.round(224 - 30 * t);
+        const face = await videoRegion(page, t, { x: cx - 20, y: 98, w: 40, h: 40 });
+        expect(face.width).toBe(400);
+        expect(face.max, `face visible at ${t}s`).toBeLessThan(40);
+      }
+      // The rest of the picture is still there.
+      const corner = await videoRegion(page, 1.5, { x: 300, y: 300, w: 40, h: 40 });
+      expect(corner.mean).toBeGreaterThan(30);
+      expect(foreign).toEqual([]);
+    });
+  }
+
+  test('with covering switched off, a video is only re-packaged', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-faces').uncheck();
+    await page.getByTestId('opt-plates').uncheck();
+    await addFile(page, fixture('real/astronaut-pan.mp4'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('video-masks')).toHaveAttribute('data-state', 'off');
+    const face = await videoRegion(page, 0.1, { x: 204, y: 98, w: 40, h: 40 });
+    expect(face.max).toBeGreaterThan(100);
   });
 
   test('shows a clear message for a file it cannot open', async ({ page }) => {

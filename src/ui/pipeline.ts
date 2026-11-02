@@ -8,7 +8,7 @@ import type { Finding } from '../lib/findings';
 import { inspectImage, sniffImage } from '../lib/inspect-image';
 
 export type ItemStatus = 'queued' | 'reading' | 'detecting' | 'cleaning' | 'ready' | 'error';
-export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'generic';
+export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'cancelled' | 'generic';
 
 export interface Item {
   id: number;
@@ -26,6 +26,12 @@ export interface Item {
   manual: Rect[];
   detectFailed: boolean;
   droppedTracks: number;
+  /** Video: what happened to faces and plates. */
+  videoMasks?: 'covered' | 'off' | 'unavailable';
+  /** Video: largest number of faces/plates seen in one sampled frame. */
+  videoObjects?: number;
+  /** Cancels a running video job. */
+  abort?: AbortController;
   output?: { blob: Blob; name: string; url: string };
   error?: ErrorKind;
 }
@@ -79,7 +85,7 @@ function errorKind(e: unknown): ErrorKind {
     if (e.reason === 'tooLarge' || e.reason === 'encode') return 'tooLarge';
     return 'leftovers';
   }
-  if (e instanceof VideoCleanError) return e.reason === 'leftovers' ? 'leftovers' : 'video';
+  if (e instanceof VideoCleanError) return e.reason === 'leftovers' ? 'leftovers' : e.reason === 'cancelled' ? 'cancelled' : 'video';
   if (e instanceof RangeError) return 'tooLarge';
   return 'generic';
 }
@@ -114,12 +120,41 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
       const inspection = await inspectVideo(sourceFromBlob(item.file));
       item.findings = inspection.findings;
       item.partial = inspection.partial;
-      set('cleaning', 0);
       // The video code is large, so it is only loaded when a video is added.
       const { cleanVideo } = await import('../lib/clean-video');
-      const result = await cleanVideo(item.file, (p) => set('cleaning', p));
-      item.droppedTracks = result.droppedTracks;
-      setOutput(item, new Blob([result.bytes as BlobPart], { type: 'video/mp4' }), 'mp4');
+      let bytes: Uint8Array | undefined;
+      if (opts.faces || opts.plates) {
+        const { cleanVideoWithMasks } = await import('../lib/video-mask');
+        item.abort = new AbortController();
+        try {
+          set('detecting', 0);
+          const r = await cleanVideoWithMasks(item.file, detector, {
+            faces: opts.faces,
+            plates: opts.plates,
+            signal: item.abort.signal,
+            onProgress: (phase, p) => set(phase === 'detect' ? 'detecting' : 'cleaning', p),
+          });
+          bytes = r.bytes;
+          item.droppedTracks = r.droppedTracks;
+          item.videoMasks = 'covered';
+          item.videoObjects = r.maxObjects;
+        } catch (e) {
+          if (!(e instanceof VideoCleanError) || e.reason !== 'cannotMask') throw e;
+          console.warn('cannot cover faces in this video here:', e.message);
+          item.videoMasks = 'unavailable';
+        } finally {
+          delete item.abort;
+        }
+      } else {
+        item.videoMasks = 'off';
+      }
+      if (!bytes) {
+        set('cleaning', 0);
+        const result = await cleanVideo(item.file, (p) => set('cleaning', p));
+        bytes = result.bytes;
+        item.droppedTracks = result.droppedTracks;
+      }
+      setOutput(item, new Blob([bytes as BlobPart], { type: 'video/mp4' }), 'mp4');
       item.output!.name = item.output!.name.replace(/^img-/, 'vid-');
     } else {
       const bytes = new Uint8Array(await item.file.arrayBuffer());
