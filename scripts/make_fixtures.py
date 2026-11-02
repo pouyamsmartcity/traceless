@@ -115,6 +115,32 @@ def make_webp():
     run([EXIFTOOL, '-q', '-overwrite_original', *COMMON_TAGS, path])
 
 
+def make_edited():
+    """A photo that carries typical signs of editing: an editor's name, a later modify date and a
+    thumbnail with a different shape (the picture was cropped after the thumbnail was made)."""
+    path = os.path.join(OUT, 'photo-edited.jpg')
+    scene(800, 600, (210, 190, 170)).save(path, quality=90)
+    thumb = os.path.join(OUT, '_thumb_square.jpg')
+    scene(160, 160, (210, 190, 170)).save(thumb, quality=80)
+    run([EXIFTOOL, '-q', '-overwrite_original', '-Make=FakePhone Co', '-Model=FakePhone 15 Pro',
+         '-DateTimeOriginal=2026:09:21 18:30:00', '-ModifyDate=2026:10:02 09:15:00',
+         '-Software=Adobe Photoshop 27.0 (Windows)', f'-ThumbnailImage<={thumb}', path])
+    os.remove(thumb)
+
+
+def make_honest():
+    """An unedited camera-style photo whose thumbnail matches the picture (no edit hints expected)."""
+    path = os.path.join(OUT, 'photo-honest.jpg')
+    img = scene(800, 600, (120, 160, 200))
+    img.save(path, quality=90)
+    thumb = os.path.join(OUT, '_thumb_same.jpg')
+    img.resize((160, 120)).save(thumb, quality=80)
+    run([EXIFTOOL, '-q', '-overwrite_original', '-Make=FakePhone Co', '-Model=FakePhone 15 Pro',
+         '-DateTimeOriginal=2026:09:21 18:30:00', '-ModifyDate=2026:09:21 18:30:00', '-Software=FakeCam 3.1',
+         f'-ThumbnailImage<={thumb}', path])
+    os.remove(thumb)
+
+
 def make_videos():
     base = ['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=2',
             '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2']
@@ -148,10 +174,10 @@ def main():
     if not EXIFTOOL:
         sys.exit('ExifTool not found. Install it or set EXIFTOOL=/path/to/exiftool')
     os.makedirs(OUT, exist_ok=True)
-    make_jpeg()
-    make_png()
-    make_webp()
-    make_videos()
+    only = sys.argv[1:]
+    for name, fn in (('jpeg', make_jpeg), ('png', make_png), ('webp', make_webp), ('edited', make_edited), ('honest', make_honest), ('videos', make_videos)):
+        if not only or name in only:
+            fn()
     print('Fixtures written to', OUT)
 
 

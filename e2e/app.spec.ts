@@ -349,6 +349,24 @@ test.describe('Pakkon', () => {
     }
   });
 
+  test('shows signs of editing for a received photo', async ({ page }) => {
+    await page.goto('/');
+    await addFile(page, fixture('leaky/photo-edited.jpg'));
+    let item = await readyItem(page);
+    for (const id of ['editingSoftware', 'dateMismatch', 'thumbnailCropped']) {
+      await expect(item.locator(`[data-hint="${id}"]`)).toBeVisible();
+    }
+    // This photo's hidden thumbnail is a different (pink) picture: noticed by comparing the pixels.
+    await addFile(page, fixture('leaky/photo-everything.jpg'));
+    item = await readyItem(page);
+    await expect(item.locator('[data-hint="thumbnailDiffers"]')).toBeVisible();
+    // An unedited photo whose thumbnail matches gets no edit hints.
+    await addFile(page, fixture('leaky/photo-honest.jpg'));
+    item = await readyItem(page);
+    await expect(item.getByTestId('findings')).toBeVisible();
+    await expect(item.getByTestId('hints')).toHaveCount(0);
+  });
+
   test('a cover can be drawn by hand', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('leaky/screenshot-leaky.png'));

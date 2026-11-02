@@ -503,6 +503,16 @@ export class App {
       list.appendChild(this.findingRow(merged, lang));
     }
     box.appendChild(list);
+    if (item.hints.length) {
+      box.appendChild(h('p', { className: 'findings-title hints-title' }, t.hintsTitle));
+      const hl = h('ul', { 'data-testid': 'hints' });
+      for (const x of item.hints) {
+        const li = h('li', { className: 'sev-low', 'data-hint': x.id }, h('span', { className: 'label' }, t.hints[x.id]));
+        if (x.value) li.appendChild(h('span', { className: 'value', dir: 'auto' }, x.value));
+        hl.appendChild(li);
+      }
+      box.appendChild(hl);
+    }
     if (item.partial) box.appendChild(h('p', { className: 'note' }, t.partialNote));
     if (item.status === 'ready') box.appendChild(h('p', { className: 'removed' }, icon(ICONS.check, 16), t.removedNote));
     return box;

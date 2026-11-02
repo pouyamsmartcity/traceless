@@ -201,3 +201,44 @@ export async function imageLeftovers(bytes: Uint8Array, type: OutputType): Promi
     ...(inspection.partial ? ['unreadable output'] : []),
   ];
 }
+
+/**
+ * Compares the hidden thumbnail with the picture itself (both shrunk to 32 x 32 grey). A large difference
+ * means the picture was changed after the thumbnail was made (cropped, edited, or a different photo).
+ * Returns the mean difference (0..1), or undefined when it cannot be measured.
+ */
+export async function thumbnailDifference(thumbnail: Uint8Array, img: DecodedImage, orientation = 1): Promise<number | undefined> {
+  const url = URL.createObjectURL(new Blob([thumbnail as BlobPart], { type: 'image/jpeg' }));
+  try {
+    const t = new Image();
+    t.src = url;
+    await t.decode();
+    const grey = (draw: (ctx: CanvasRenderingContext2D) => void) => {
+      const c = document.createElement('canvas');
+      c.width = 32;
+      c.height = 32;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      draw(ctx);
+      const d = ctx.getImageData(0, 0, 32, 32).data;
+      const g = new Float32Array(1024);
+      for (let i = 0; i < 1024; i++) g[i] = (0.299 * d[i * 4]! + 0.587 * d[i * 4 + 1]! + 0.114 * d[i * 4 + 2]!) / 255;
+      return g;
+    };
+    const main = grey((ctx) => ctx.drawImage(img.element, 0, 0, 32, 32));
+    // The thumbnail is stored unrotated; turn it the way the browser turned the picture.
+    const thumb = grey((ctx) => {
+      ctx.translate(16, 16);
+      if (orientation === 3) ctx.rotate(Math.PI);
+      else if (orientation === 6) ctx.rotate(Math.PI / 2);
+      else if (orientation === 8) ctx.rotate(-Math.PI / 2);
+      ctx.drawImage(t, -16, -16, 32, 32);
+    });
+    let sum = 0;
+    for (let i = 0; i < 1024; i++) sum += Math.abs(main[i]! - thumb[i]!);
+    return sum / 1024;
+  } catch {
+    return undefined;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

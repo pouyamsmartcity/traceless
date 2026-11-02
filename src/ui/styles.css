@@ -546,3 +546,7 @@ details.detail code {
   font-size: 0.8rem;
   overflow-wrap: anywhere;
 }
+
+.hints-title {
+  margin-top: 10px;
+}

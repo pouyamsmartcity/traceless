@@ -10,6 +10,10 @@ and videos with location, device tags and an extra subtitle track holding GPS te
 
 The tests check that Pakkon reports these leaks and that the cleaned files contain none of them.
 
+`photo-edited.jpg` carries typical signs of editing (an editor's name, a later modify date, a thumbnail of a
+different shape) and `photo-honest.jpg` is an unedited photo whose thumbnail matches; they test the edit hints and
+the absence of false alarms. Regenerate one group with e.g. `python3 scripts/make_fixtures.py edited`.
+
 ## `real/`
 
 | File | Source | Licence |

@@ -22,9 +22,20 @@ export function sniffImage(b: Uint8Array): ImageKind {
   return 'unknown';
 }
 
+/** Signs that a received photo was edited or re-saved. Hints for checking a source, never proof. */
+export type HintId = 'editingSoftware' | 'dateMismatch' | 'thumbnailCropped' | 'thumbnailDiffers' | 'noCameraData';
+
+export interface Hint {
+  id: HintId;
+  value?: string;
+}
+
 export interface ImageInspection {
   kind: ImageKind;
   findings: Finding[];
+  hints: Hint[];
+  /** The embedded thumbnail (JPEG), for comparing with the picture in the browser. */
+  thumbnail?: Uint8Array;
   /** EXIF orientation (1-8) if present. Browsers apply it when drawing, we only report it. */
   orientation?: number;
   /** True when the structure could not be fully read; findings may be incomplete. */
@@ -109,7 +120,17 @@ function asDict(v: unknown): Dict | undefined {
   return v && typeof v === 'object' && !(v instanceof Uint8Array) ? (v as Dict) : undefined;
 }
 
-async function readExif(input: Uint8Array, out: FindingList): Promise<number | undefined> {
+const EDITORS = /photoshop|lightroom|gimp|snapseed|picsart|canva|pixelmator|affinity|facetune|vsco|meitu|luminar|capture one|paint\.net|krita/i;
+
+/** EXIF date "2026:09:21 18:30:00" (or a Date) as milliseconds, or undefined. */
+function exifTime(v: unknown): number | undefined {
+  if (v instanceof Date) return isNaN(v.getTime()) ? undefined : v.getTime();
+  if (typeof v !== 'string') return undefined;
+  const m = /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(v);
+  return m ? Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!) : undefined;
+}
+
+async function readExif(input: Uint8Array, out: FindingList, hints: Hint[]): Promise<number | undefined> {
   const data = asDict(
     await exifr.parse(input, {
       tiff: true,
@@ -168,8 +189,28 @@ async function readExif(input: Uint8Array, out: FindingList): Promise<number | u
     for (const k of ['City', 'Sublocation', 'State', 'Country']) if (iptc[k]) out.add('cityName', iptc[k]);
     for (const k of ['Byline', 'Credit', 'Writer']) if (iptc[k]) out.add('owner', iptc[k]);
   }
+  const software = [ifd0.Software, ifd0.ProcessingSoftware].find((v) => typeof v === 'string' && EDITORS.test(v));
+  if (software) hints.push({ id: 'editingSoftware', value: String(software) });
+  const original = exifTime(exif.DateTimeOriginal);
+  const modified = exifTime(ifd0.ModifyDate);
+  if (original !== undefined && modified !== undefined && Math.abs(modified - original) > 60_000) {
+    hints.push({ id: 'dateMismatch', value: `${String(exif.DateTimeOriginal)} → ${String(ifd0.ModifyDate)}` });
+  }
   const o = Number(ifd0.Orientation);
   return Number.isInteger(o) && o >= 1 && o <= 8 ? o : undefined;
+}
+
+/** Width and height stored in a JPEG's frame header. */
+export function jpegSize(b: Uint8Array): { width: number; height: number } | undefined {
+  try {
+    const sof = parseJpeg(b).segments.find((s) => s.marker >= 0xc0 && s.marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(s.marker));
+    if (!sof || sof.payload.length < 5) return undefined;
+    const height = (sof.payload[1]! << 8) | sof.payload[2]!;
+    const width = (sof.payload[3]! << 8) | sof.payload[4]!;
+    return width && height ? { width, height } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Lists everything an image file reveals about where, when, how and by whom it was made. */
@@ -191,15 +232,37 @@ export async function inspectImage(b: Uint8Array): Promise<ImageInspection> {
     partial = true;
   }
   let orientation: number | undefined;
+  const hints: Hint[] = [];
   if (containers.exifInput) {
     try {
-      orientation = await readExif(containers.exifInput, out);
+      orientation = await readExif(containers.exifInput, out, hints);
     } catch {
       partial = true;
     }
   }
+  // A camera photo without any camera data was probably re-saved, edited or sent through a messenger.
+  if ((kind === 'jpeg' || kind === 'webp' || kind === 'heic') && !out.has('deviceModel') && !out.has('dateTaken')) {
+    hints.push({ id: 'noCameraData' });
+  }
   for (const x of containers.xmp) inspectXmp(x, out);
-  const result: ImageInspection = { kind, findings: out.items, partial };
+  const result: ImageInspection = { kind, findings: out.items, hints, partial };
   if (orientation !== undefined) result.orientation = orientation;
+  if (kind === 'jpeg' && out.has('thumbnail')) {
+    try {
+      const thumb = await exifr.thumbnail(b);
+      if (thumb && thumb.length) {
+        const t = new Uint8Array(thumb);
+        result.thumbnail = t;
+        const ts = jpegSize(t);
+        const ms = jpegSize(b);
+        // A thumbnail with a different shape usually means the picture was cropped after it was taken.
+        if (ts && ms && Math.abs(ts.width / ts.height - ms.width / ms.height) > 0.06) {
+          hints.push({ id: 'thumbnailCropped', value: `${ts.width}×${ts.height} / ${ms.width}×${ms.height}` });
+        }
+      }
+    } catch {
+      // A broken thumbnail is not a reason to stop.
+    }
+  }
   return result;
 }

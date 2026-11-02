@@ -1,11 +1,11 @@
 import { inspectVideo } from '../lib/bmff';
 import { sourceFromBlob } from '../lib/bytes';
-import { ImageCleanError, chooseOutputType, decodeImage, renderClean, type DecodedImage, type OutputType } from '../lib/clean-image';
+import { ImageCleanError, chooseOutputType, decodeImage, renderClean, thumbnailDifference, type DecodedImage, type OutputType } from '../lib/clean-image';
 import { VideoCleanError } from '../lib/video-errors';
 import { DetectionError, type Detector } from '../lib/detect/detector';
 import type { Detection, Rect } from '../lib/detect/geometry';
 import type { Finding } from '../lib/findings';
-import { inspectImage, sniffImage } from '../lib/inspect-image';
+import { inspectImage, sniffImage, type Hint } from '../lib/inspect-image';
 
 export type ItemStatus = 'queued' | 'reading' | 'detecting' | 'cleaning' | 'ready' | 'error';
 export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'videoMask' | 'cancelled' | 'generic';
@@ -17,6 +17,8 @@ export interface Item {
   status: ItemStatus;
   progress?: number;
   findings: Finding[];
+  /** Signs that the received photo was edited or re-saved (hints, not proof). */
+  hints: Hint[];
   partial: boolean;
   decoded?: DecodedImage;
   outputType?: OutputType;
@@ -74,6 +76,9 @@ export interface VideoOptions {
 
 let nextId = 1;
 
+/** Mean grey difference above which a thumbnail shows a different picture (same picture: about 0.02). */
+const THUMBNAIL_DIFF = 0.12;
+
 /** The whole new video is built in memory; beyond this size phones run out of memory. */
 const MAX_VIDEO_BYTES = 2 * 1024 ** 3;
 
@@ -89,6 +94,7 @@ export function newItem(file: File): Item {
     media: isVideoFile(file) ? 'video' : 'image',
     status: 'queued',
     findings: [],
+    hints: [],
     partial: false,
     detections: [],
     removed: new Set(),
@@ -268,6 +274,11 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
         throw new ImageCleanError('unsupported', 'not an image');
       }
       item.decoded = await decodeImage(item.file);
+      item.hints = inspection.hints;
+      if (inspection.thumbnail && !item.hints.some((x) => x.id === 'thumbnailCropped')) {
+        const diff = await thumbnailDifference(inspection.thumbnail, item.decoded, inspection.orientation);
+        if (diff !== undefined && diff > THUMBNAIL_DIFF) item.hints.push({ id: 'thumbnailDiffers' });
+      }
       set('detecting', 0);
       try {
         item.detections = await detector.detect(item.decoded.element, item.decoded.width, item.decoded.height, {

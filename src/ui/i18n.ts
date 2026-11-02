@@ -1,4 +1,5 @@
 import type { FindingId } from '../lib/findings';
+import type { HintId } from '../lib/inspect-image';
 
 export type Lang = 'fa' | 'en';
 
@@ -125,6 +126,14 @@ const fa = {
     extraTracks: 'لایهٔ دادهٔ اضافه (مثلاً مسیر GPS یا زیرنویس)',
     otherMetadata: 'اطلاعات پنهان دیگر',
   } satisfies Record<FindingId, string>,
+  hintsTitle: 'نشانه‌های ویرایش (فقط نشانه، نه مدرک):',
+  hints: {
+    editingSoftware: 'با یک نرم‌افزار ویرایش عکس ذخیره شده',
+    dateMismatch: 'زمان آخرین تغییر با زمان عکاسی فرق دارد',
+    thumbnailCropped: 'عکس کوچک پنهان شکل دیگری دارد؛ احتمالاً عکس بعداً بریده شده',
+    thumbnailDiffers: 'عکس کوچک پنهان چیز دیگری نشان می‌دهد؛ عکس بعد از گرفتن تغییر کرده',
+    noCameraData: 'هیچ اطلاعات دوربینی ندارد؛ احتمالاً دوباره ذخیره شده، ویرایش شده یا از پیام‌رسان آمده',
+  } satisfies Record<HintId, string>,
   footer: 'نرم‌افزار آزاد و رایگان از پویام',
   sourceCode: 'کد برنامه',
   dataCredit: 'فهرست مکان‌ها: GeoNames (CC BY 4.0)',
@@ -254,6 +263,14 @@ const en: Strings = {
     textChunks: 'Hidden text',
     extraTracks: 'Extra data track (for example a GPS track or subtitles)',
     otherMetadata: 'Other hidden data',
+  },
+  hintsTitle: 'Signs of editing (hints, not proof):',
+  hints: {
+    editingSoftware: 'Saved by photo-editing software',
+    dateMismatch: 'Last changed at a different time than it was taken',
+    thumbnailCropped: 'The hidden thumbnail has a different shape; the photo was probably cropped later',
+    thumbnailDiffers: 'The hidden thumbnail shows something else; the photo was changed after it was taken',
+    noCameraData: 'No camera data at all; probably re-saved, edited or received through a messenger',
   },
   footer: 'Free and open-source software by Pouyam',
   sourceCode: 'Source code',
