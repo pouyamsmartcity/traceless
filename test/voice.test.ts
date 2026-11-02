@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PitchShifter, randomVoiceRatio } from '../src/lib/voice';
+import { PitchShifter, VOICE_DRIFT, VOICE_MIN, VOICE_SPAN, randomVoiceRatio } from '../src/lib/voice';
 
 /** Dominant frequency by counting upward zero crossings. */
 function frequency(x: Float32Array, rate: number, skip: number): number {
@@ -45,9 +45,11 @@ describe('voice change', () => {
   it('picks a clearly lower voice at random', () => {
     for (const r of [0, 0.5, 0.999]) {
       const v = randomVoiceRatio(() => r);
-      expect(v).toBeGreaterThanOrEqual(0.72);
-      expect(v).toBeLessThan(0.82);
+      expect(v).toBeGreaterThanOrEqual(VOICE_MIN);
+      expect(v).toBeLessThan(VOICE_MIN + VOICE_SPAN);
     }
+    // Even with drift, the voice is always clearly lower, never higher.
+    expect(VOICE_MIN + VOICE_SPAN + VOICE_DRIFT).toBeLessThan(0.9);
     expect(() => new PitchShifter(10, rate, 1)).toThrow();
   });
 });

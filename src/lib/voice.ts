@@ -62,7 +62,12 @@ export class PitchShifter {
   }
 }
 
-/** A random factor that clearly lowers the voice (0.72 - 0.82). `rand` returns numbers in [0, 1). */
+/** The base factor is random in [VOICE_MIN, VOICE_MIN + VOICE_SPAN); it then drifts by up to +/-VOICE_DRIFT. */
+export const VOICE_MIN = 0.72;
+export const VOICE_SPAN = 0.1;
+export const VOICE_DRIFT = 0.04;
+
+/** A random factor that clearly lowers the voice. `rand` returns numbers in [0, 1). */
 export function randomVoiceRatio(rand: () => number): number {
-  return 0.72 + 0.1 * rand();
+  return VOICE_MIN + VOICE_SPAN * rand();
 }

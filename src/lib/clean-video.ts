@@ -10,7 +10,7 @@ import {
   canEncodeAudio,
   type ConversionAudioOptions,
 } from 'mediabunny';
-import { PitchShifter, randomVoiceRatio } from './voice';
+import { PitchShifter, VOICE_DRIFT, randomVoiceRatio } from './voice';
 import { sourceFromBlob, sourceFromBytes } from './bytes';
 import { assertSaneMovie, inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
 import { sanitizeMp4, streamLeftovers } from './sanitize-video';
@@ -53,7 +53,7 @@ export async function soundConversion(opts: SoundOptions): Promise<{ audio?: Con
         const frames = sample.numberOfFrames;
         shifter ??= new PitchShifter(ratio, sample.sampleRate, channels);
         // The factor wanders slowly (+/-0.04 over a few seconds), so no single factor undoes it exactly.
-        shifter.ratio = ratio + 0.04 * Math.sin((2 * Math.PI * sample.timestamp) / drift.period + drift.phase);
+        shifter.ratio = ratio + VOICE_DRIFT * Math.sin((2 * Math.PI * sample.timestamp) / drift.period + drift.phase);
         const planes: Float32Array[] = [];
         for (let c = 0; c < channels; c++) {
           const plane = new Float32Array(frames);

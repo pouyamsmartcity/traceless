@@ -6,6 +6,7 @@ import { sourceFromBytes } from '../src/lib/bytes';
 import { inspectVideo } from '../src/lib/bmff';
 import { imageLeftovers } from '../src/lib/clean-image';
 import { inspectImage } from '../src/lib/inspect-image';
+import { VOICE_DRIFT, VOICE_MIN, VOICE_SPAN } from '../src/lib/voice';
 
 const fixture = (p: string) => fileURLToPath(new URL(`../test/fixtures/${p}`, import.meta.url));
 
@@ -576,8 +577,10 @@ test.describe('Pakkon', () => {
       for (let i = start + 1; i < end; i++) if (x[i - 1]! < 0 && x[i]! >= 0) n++;
       return n / ((end - start) / audio.sampleRate);
     }, href);
-    expect(hz).toBeGreaterThan(330 * 0.7);
-    expect(hz).toBeLessThan(330 * 0.84);
+    // Allowed range: lowest and highest factor the app can use (base +/- drift), with 3% measuring tolerance.
+    expect(hz).toBeGreaterThan(330 * (VOICE_MIN - VOICE_DRIFT) * 0.97);
+    expect(hz).toBeLessThan(330 * (VOICE_MIN + VOICE_SPAN + VOICE_DRIFT) * 1.03);
+    expect(hz).toBeLessThan(330 * 0.92); // always clearly lower than the original
   });
 
   test('if voices cannot be changed here, the user chooses: remove the sound or keep it', async ({ page }) => {
