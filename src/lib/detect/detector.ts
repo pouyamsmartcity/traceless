@@ -10,6 +10,17 @@ const PLATE_TILE = 1152;
 /** First run includes loading the runtime and models; later runs take well under a second. */
 const INFER_TIMEOUT_MS = 120_000;
 
+/** Some detection passes failed; `partial` holds what the passes that worked found. */
+export class DetectionError extends Error {
+  constructor(
+    message: string,
+    readonly partial: Detection[],
+  ) {
+    super(message);
+    this.name = 'DetectionError';
+  }
+}
+
 export interface DetectOptions {
   faces: boolean;
   plates: boolean;
@@ -198,13 +209,18 @@ export class Detector {
     }
     const found: { model: ModelId; box: Rect; score: number }[] = [];
     let done = 0;
+    let failure: unknown;
     try {
       for (const pass of passes) {
         const spec = MODELS[pass.model];
         const lb = letterbox(pass.region, spec.size);
-        const tensor = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels);
-        const boxes = await this.infer(pass.model, tensor, spec.size, spec.size);
-        for (const b of boxes) found.push({ model: pass.model, box: unletterbox(b, lb), score: b.score });
+        try {
+          const tensor = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels);
+          const boxes = await this.infer(pass.model, tensor, spec.size, spec.size);
+          for (const b of boxes) found.push({ model: pass.model, box: unletterbox(b, lb), score: b.score });
+        } catch (e) {
+          failure ??= e;
+        }
         opts.onProgress?.(++done / passes.length);
       }
     } finally {
@@ -213,7 +229,9 @@ export class Detector {
         shrunk.height = 0;
       }
     }
-    return mergeDetections(found, w, h);
+    const merged = mergeDetections(found, w, h);
+    if (failure) throw new DetectionError(failure instanceof Error ? failure.message : String(failure), merged);
+    return merged;
   }
 
   /**
@@ -234,7 +252,12 @@ export class Detector {
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(source, p.region.x, p.region.y, p.region.w, p.region.h, 0, 0, p.inW, p.inH);
         const tensor = toTensorWH(ctx.getImageData(0, 0, p.inW, p.inH).data, p.inW, p.inH, MODELS.text.pixels);
-        const boxes = await this.infer('text', tensor, p.inW, p.inH);
+        let boxes: RawBox[];
+        try {
+          boxes = await this.infer('text', tensor, p.inW, p.inH);
+        } catch (e) {
+          throw new DetectionError(e instanceof Error ? e.message : String(e), nms(found, 0.5));
+        }
         const fx = p.region.w / p.inW;
         const fy = p.region.h / p.inH;
         for (const b of boxes) {

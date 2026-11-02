@@ -3,13 +3,12 @@
 const VERSION = '__VERSION__';
 const PRECACHE = __FILES__;
 const CACHE = `pakkon-${VERSION}`;
-const SHARE_CACHE = 'pakkon-shared';
 
 /** Stores every app file. Files that did not change since the last version are copied from the old
  * cache instead of downloaded again (helps on slow or expensive connections). */
 async function precache() {
   const cache = await caches.open(CACHE);
-  const old = (await caches.keys()).filter((k) => k.startsWith('pakkon-') && k !== CACHE && k !== SHARE_CACHE);
+  const old = (await caches.keys()).filter((k) => k.startsWith('pakkon-') && k !== CACHE && k !== 'pakkon-shared');
   const missing = [];
   for (const url of PRECACHE) {
     // Every entry ends in ?v=<content fingerprint>: an exact match in an old cache is the same file.
@@ -29,22 +28,28 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('pakkon-') && k !== CACHE && k !== SHARE_CACHE).map((k) => caches.delete(k))))
+      // Old app versions, and the share storage older versions used, are removed.
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('pakkon-') && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
 
+/** Files received from the share sheet, held in memory only (never written to storage) until the page takes them. */
+let sharedFiles = [];
+
 async function receiveShare(request) {
   const data = await request.formData();
-  const cache = await caches.open(SHARE_CACHE);
-  let i = 0;
-  for (const file of data.getAll('media')) {
-    if (!(file instanceof File)) continue;
-    const headers = { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name || 'shared') };
-    await cache.put(new Request(`./shared/${Date.now()}-${i++}`), new Response(file, { headers }));
-  }
+  sharedFiles = data.getAll('media').filter((f) => f instanceof File);
   return Response.redirect('./?shared=1', 303);
 }
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'take-shared' && event.source) {
+    const files = sharedFiles;
+    sharedFiles = [];
+    event.source.postMessage({ type: 'shared-files', files });
+  }
+});
 
 /**
  * Adds cross-origin isolation headers to our own responses. This lets the detector use several

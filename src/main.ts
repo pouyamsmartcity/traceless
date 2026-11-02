@@ -9,27 +9,30 @@ const root = document.getElementById('app')!;
 const app = new App(root, base);
 app.start();
 
-/** Picks up files sent to Pakkon from another app's share sheet (Android, installed app). */
+/**
+ * Picks up files sent to Pakkon from another app's share sheet (Android, installed app).
+ * The offline worker holds them in memory and hands them over by message; they are never stored.
+ */
 async function takeSharedFiles(): Promise<void> {
-  if (!('caches' in window)) return;
+  // Older versions kept shared files in storage: make sure nothing is left there.
+  if ('caches' in window) await caches.delete(SHARE_CACHE).catch(() => false);
   const params = new URLSearchParams(location.search);
-  const cache = await caches.open(SHARE_CACHE);
-  if (!params.has('shared')) {
-    // Shared originals must never linger in storage: remove any left from an interrupted share.
-    for (const req of await cache.keys()) await cache.delete(req);
-    return;
-  }
+  if (!params.has('shared') || !('serviceWorker' in navigator)) return;
   history.replaceState(null, '', location.pathname);
-  const files: File[] = [];
-  for (const req of await cache.keys()) {
-    const res = await cache.match(req);
-    if (res) {
-      const blob = await res.blob();
-      const name = decodeURIComponent(res.headers.get('x-file-name') ?? 'shared');
-      files.push(new File([blob], name, { type: blob.type }));
-    }
-    await cache.delete(req);
-  }
+  const reg = await navigator.serviceWorker.ready;
+  const worker = navigator.serviceWorker.controller ?? reg.active;
+  if (!worker) return;
+  const files = await new Promise<File[]>((resolve) => {
+    const timer = setTimeout(() => resolve([]), 10_000);
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type !== 'shared-files') return;
+      clearTimeout(timer);
+      navigator.serviceWorker.removeEventListener('message', onMessage);
+      resolve((e.data.files as unknown[]).filter((f): f is File => f instanceof File));
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    worker.postMessage({ type: 'take-shared' });
+  });
   if (files.length) app.addFiles(files);
 }
 

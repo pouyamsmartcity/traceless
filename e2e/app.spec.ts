@@ -230,8 +230,8 @@ test.describe('Pakkon', () => {
     await expect(item.getByTestId('findings').locator('[data-finding="gps"]').first()).toBeVisible();
     const { name } = await outputBytes(page);
     expect(name).not.toContain('IMG_2026');
-    // The shared file does not stay behind in storage, and the address bar is cleaned.
-    expect(await page.evaluate(async () => (await (await caches.open('pakkon-shared')).keys()).length)).toBe(0);
+    // The shared file is never written to storage, and the address bar is cleaned.
+    expect(await page.evaluate(async () => (await caches.keys()).filter((k) => !/^pakkon-[0-9a-f]{12}$/.test(k)))).toEqual([]);
     expect(page.url()).not.toContain('shared');
   });
 
@@ -259,6 +259,49 @@ test.describe('Pakkon', () => {
     await page.getByTestId('editor-done').click();
     await readyItem(page);
     expect((await regionColor(page, { x: 575, y: 19, w: 100, h: 10 })).max).toBeGreaterThan(100);
+  });
+
+  test('if face finding fails, the photo is held back until the user covers by hand or confirms', async ({ page, context }) => {
+    await context.route(/models\/.*\.onnx/, (route) => route.abort());
+    await page.goto('/');
+    await addFile(page, fixture('real/astronaut.png'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('use-anyway')).toBeVisible();
+    await expect(item.getByTestId('save')).toHaveCount(0);
+    await item.getByTestId('use-anyway').click();
+    await expect(item.getByTestId('save')).toBeVisible();
+  });
+
+  test('if video covering fails, no video is made unless the user chooses to continue without it', async ({ page, context }) => {
+    await context.route(/models\/.*\.onnx/, (route) => route.abort());
+    await page.goto('/');
+    await addFile(page, fixture('real/astronaut-pan.mp4'));
+    const item = page.getByTestId('item').first();
+    await expect(item.getByTestId('continue-without')).toBeVisible({ timeout: 90_000 });
+    await expect(item.getByTestId('save')).toHaveCount(0);
+    await item.getByTestId('continue-without').click();
+    await readyItem(page);
+    await expect(item.getByTestId('video-masks')).toHaveAttribute('data-state', 'unavailable');
+    const { bytes } = await outputBytes(page);
+    expect((await inspectVideo(sourceFromBytes(bytes))).findings).toEqual([]);
+  });
+
+  test('switching an option off and on quickly ends with a copy that matches the switches', async ({ page }) => {
+    await page.goto('/');
+    await addFile(page, fixture('real/astronaut.png'));
+    await readyItem(page);
+    await page.getByTestId('opt-faces').uncheck();
+    await page.getByTestId('opt-faces').check();
+    await page.getByTestId('opt-extra').check();
+    await page.getByTestId('opt-extra').uncheck();
+    await readyItem(page);
+    await page.waitForTimeout(1500);
+    await readyItem(page);
+    await expect(page.getByTestId('mask-summary')).toContainText('۱ صورت');
+    await expect(page.getByTestId('extra-note')).toHaveCount(0);
+    const face = await regionColor(page, { x: 195, y: 80, w: 60, h: 80 });
+    expect(face.width).toBe(512);
+    expect(face.max).toBeLessThan(8);
   });
 
   test('a cover can be drawn by hand', async ({ page }) => {

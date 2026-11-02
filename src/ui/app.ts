@@ -4,7 +4,7 @@ import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon } from './dom';
 import { openEditor } from './editor';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
-import { ensureText, newItem, processItem, renderImage, type Item, type Options } from './pipeline';
+import { ensureText, newItem, processItem, renderImage, sameOptions, type Item, type Options } from './pipeline';
 
 interface Settings extends Options {
   lang: Lang;
@@ -93,9 +93,16 @@ export class App {
       this.items.unshift(item);
       this.listEl.prepend(this.cardFor(item));
       this.updateCard(item);
-      this.queue = this.queue.then(() => processItem(item, this.settings, this.detector, () => this.updateCard(item)));
+      this.enqueue(item);
     }
     this.updateBulk();
+  }
+
+  private enqueue(item: Item): void {
+    this.queue = this.queue
+      .then(() => processItem(item, this.settings, this.detector, () => this.updateCard(item)))
+      .then(() => this.refresh(item))
+      .catch((e: unknown) => console.error(e));
   }
 
   private render(): void {
@@ -219,9 +226,29 @@ export class App {
   }
 
   private async rerenderAll(): Promise<void> {
-    for (const item of this.items) {
-      if (item.status !== 'ready' || item.media !== 'image') continue;
-      await this.rerender(item);
+    // Loop over a copy: the list may change while we work.
+    for (const item of [...this.items]) await this.refresh(item);
+  }
+
+  /**
+   * Makes sure a photo's safe copy matches the current options. If the options change while a copy is being
+   * made, it is made again, so what is shown, summarised and shared always matches the switches.
+   */
+  private async refresh(item: Item, force = false): Promise<void> {
+    if (item.media !== 'image' || !item.decoded) return;
+    if (item.busy) {
+      item.stale = true;
+      return;
+    }
+    if (item.status !== 'ready' || (!force && sameOptions(item.renderedWith, this.settings))) return;
+    item.busy = true;
+    try {
+      do {
+        item.stale = false;
+        await this.rerender(item);
+      } while (item.status === 'ready' && (item.stale || !sameOptions(item.renderedWith, this.settings)));
+    } finally {
+      item.busy = false;
     }
   }
 
@@ -240,7 +267,9 @@ export class App {
       console.error(e);
       item.status = 'error';
       item.error = 'generic';
+      item.errorDetail = (e instanceof Error ? `${e.name}: ${e.message}` : String(e)).slice(0, 300);
     }
+    if (!this.items.includes(item)) return;
     this.updateCard(item);
   }
 
@@ -288,10 +317,22 @@ export class App {
         tooLarge: t.errTooLarge,
         leftovers: t.errLeftovers,
         video: t.errVideo,
+        videoMask: t.errVideoMask,
         cancelled: t.errCancelled,
         generic: t.errGeneric,
       }[item.error ?? 'generic'];
       body.appendChild(h('p', { className: 'error', role: 'alert', 'data-testid': 'item-error' }, msg));
+      if (item.error === 'videoMask') {
+        const go = h('button', { type: 'button', className: 'btn', 'data-testid': 'continue-without' }, t.continueWithout);
+        go.addEventListener('click', () => {
+          item.skipVideoMasks = true;
+          item.status = 'queued';
+          delete item.error;
+          this.updateCard(item);
+          this.enqueue(item);
+        });
+        body.appendChild(go);
+      }
       if (item.errorDetail) {
         body.appendChild(h('details', { className: 'detail' }, h('summary', {}, t.errorDetails), h('code', { dir: 'ltr' }, item.errorDetail)));
       }
@@ -310,19 +351,23 @@ export class App {
 
     if (item.status === 'ready' && item.output) {
       if (item.media === 'image') {
-        const faces = item.detections.filter((d, i) => d.kind === 'face' && this.settings.faces && !item.removed.has(i)).length;
-        const plates = item.detections.filter((d, i) => d.kind === 'plate' && this.settings.plates && !item.removed.has(i)).length;
-        const texts = this.settings.text ? item.detections.filter((d, i) => d.kind === 'text' && !item.removed.has(i)).length : undefined;
+        // Count from the options this copy was really made with.
+        const used = item.renderedWith ?? this.settings;
+        const count = (kind: 'face' | 'plate' | 'text') => item.detections.filter((d, i) => d.kind === kind && !item.removed.has(i)).length;
+        const faces = used.faces ? count('face') : 0;
+        const plates = used.plates ? count('plate') : 0;
+        const texts = used.text ? count('text') : undefined;
         body.appendChild(h('p', { className: 'masks', 'data-testid': 'mask-summary' }, t.masksSummary(faces, plates, item.manual.length, texts)));
         if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
-        if (this.settings.extra) body.appendChild(h('p', { className: 'note', 'data-testid': 'extra-note' }, t.extraApplied));
+        if (used.extra) body.appendChild(h('p', { className: 'note', 'data-testid': 'extra-note' }, t.extraApplied));
         body.appendChild(h('p', { className: 'note' }, t.checkPicture));
       } else {
         const videoNote = { covered: t.videoCovered, off: t.videoMasksOff, unavailable: t.videoMasksUnavailable }[item.videoMasks ?? 'off'];
         body.appendChild(h('p', { className: item.videoMasks === 'covered' ? 'note' : 'warn', 'data-testid': 'video-masks', 'data-state': item.videoMasks ?? 'off' }, videoNote));
         if (item.droppedTracks > 0) body.appendChild(h('p', { className: 'note' }, t.videoDropped(item.droppedTracks)));
       }
-      body.appendChild(this.actions(item));
+      if (item.needsReview) body.appendChild(this.reviewGate(item));
+      else body.appendChild(this.actions(item));
     }
 
     if (item.findings.length || item.status === 'ready') body.appendChild(this.findingsView(item));
@@ -340,6 +385,26 @@ export class App {
     this.updateBulk();
   }
 
+  /** Shown instead of Share/Save when automatic covering failed: cover by hand, or confirm. */
+  private reviewGate(item: Item): HTMLElement {
+    const t = this.t;
+    const row = h('div', { className: 'actions' });
+    const edit = h('button', { type: 'button', className: 'btn primary', 'data-testid': 'edit' }, icon(ICONS.edit), t.editMasks);
+    edit.addEventListener('click', async () => {
+      if (await openEditor(item, this.settings, t)) {
+        item.needsReview = false;
+        await this.refresh(item, true);
+      }
+    });
+    const anyway = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'use-anyway' }, t.useAnyway);
+    anyway.addEventListener('click', () => {
+      item.needsReview = false;
+      this.updateCard(item);
+    });
+    row.append(edit, anyway);
+    return h('div', { className: 'review', role: 'alert' }, h('p', { className: 'warn' }, t.reviewNeeded), row);
+  }
+
   private actions(item: Item): HTMLElement {
     const t = this.t;
     const out = item.output!;
@@ -355,7 +420,7 @@ export class App {
     if (item.media === 'image' && item.decoded) {
       const edit = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'edit' }, icon(ICONS.edit), t.editMasks);
       edit.addEventListener('click', async () => {
-        if (await openEditor(item, this.settings, t)) await this.rerender(item);
+        if (await openEditor(item, this.settings, t)) await this.refresh(item, true);
       });
       row.appendChild(edit);
     }

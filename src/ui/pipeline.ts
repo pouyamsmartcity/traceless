@@ -2,13 +2,13 @@ import { inspectVideo } from '../lib/bmff';
 import { sourceFromBlob } from '../lib/bytes';
 import { ImageCleanError, chooseOutputType, decodeImage, renderClean, type DecodedImage, type OutputType } from '../lib/clean-image';
 import { VideoCleanError } from '../lib/video-errors';
-import type { Detector } from '../lib/detect/detector';
+import { DetectionError, type Detector } from '../lib/detect/detector';
 import type { Detection, Rect } from '../lib/detect/geometry';
 import type { Finding } from '../lib/findings';
 import { inspectImage, sniffImage } from '../lib/inspect-image';
 
 export type ItemStatus = 'queued' | 'reading' | 'detecting' | 'cleaning' | 'ready' | 'error';
-export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'cancelled' | 'generic';
+export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'videoMask' | 'cancelled' | 'generic';
 
 export interface Item {
   id: number;
@@ -35,6 +35,15 @@ export interface Item {
   /** Cancels a running video job. */
   abort?: AbortController;
   output?: { blob: Blob; name: string; url: string };
+  /** The exact options the current safe copy was made with (the summary is built from these). */
+  renderedWith?: Options;
+  /** Automatic finding failed: the copy is held back until the user covers by hand or confirms. */
+  needsReview: boolean;
+  /** A re-render is running; `stale` asks for another one when it ends. */
+  busy?: boolean;
+  stale?: boolean;
+  /** The user chose to continue without covering in a video whose covering failed. */
+  skipVideoMasks?: boolean;
   error?: ErrorKind;
   /** Technical detail of an error, shown so a user can report it (never contains file contents). */
   errorDetail?: string;
@@ -73,6 +82,7 @@ export function newItem(file: File): Item {
     detectFailed: false,
     textDetected: false,
     droppedTracks: 0,
+    needsReview: false,
   };
 }
 
@@ -96,6 +106,8 @@ export async function ensureText(item: Item, detector: Detector, onProgress?: (f
   } catch (e) {
     console.error('text detection failed', e);
     item.detectFailed = true;
+    if (e instanceof DetectionError) item.detections.push(...e.partial);
+    item.needsReview = true;
   }
   item.textDetected = true;
 }
@@ -114,7 +126,10 @@ function errorKind(e: unknown): ErrorKind {
     if (e.reason === 'tooLarge' || e.reason === 'encode') return 'tooLarge';
     return 'leftovers';
   }
-  if (e instanceof VideoCleanError) return e.reason === 'leftovers' ? 'leftovers' : e.reason === 'cancelled' ? 'cancelled' : 'video';
+  if (e instanceof VideoCleanError) {
+    if (e.reason === 'cannotMask') return 'videoMask';
+    return e.reason === 'leftovers' ? 'leftovers' : e.reason === 'cancelled' ? 'cancelled' : 'video';
+  }
   if (e instanceof RangeError) return 'tooLarge';
   return 'generic';
 }
@@ -127,6 +142,7 @@ function setOutput(item: Item, blob: Blob, ext: string): void {
 /** Builds (or rebuilds after editing) the safe copy of an image whose detections are known. */
 export async function renderImage(item: Item, opts: Options): Promise<void> {
   if (!item.decoded || !item.outputType) throw new Error('image not decoded');
+  const snapshot: Options = { faces: opts.faces, plates: opts.plates, text: opts.text, extra: opts.extra };
   const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra });
   const type = item.outputType;
   const ext = type === 'image/png' ? 'png' : 'jpg';
@@ -134,6 +150,16 @@ export async function renderImage(item: Item, opts: Options): Promise<void> {
   const name = item.output?.name;
   setOutput(item, new Blob([bytes as BlobPart], { type }), ext);
   if (name) item.output!.name = name;
+  item.renderedWith = snapshot;
+}
+
+export function sameOptions(a: Options | undefined, b: Options): boolean {
+  return !!a && a.faces === b.faces && a.plates === b.plates && a.text === b.text && a.extra === b.extra;
+}
+
+/** Whether the photo's automatic covering has to be checked by the user before the copy is offered. */
+export function coveringRequested(opts: Options): boolean {
+  return opts.faces || opts.plates || opts.text;
 }
 
 export async function processItem(item: Item, opts: Options, detector: Detector, update: () => void): Promise<void> {
@@ -153,7 +179,7 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
       // The video code is large, so it is only loaded when a video is added.
       const { cleanVideo } = await import('../lib/clean-video');
       let bytes: Uint8Array | undefined;
-      if (opts.faces || opts.plates) {
+      if ((opts.faces || opts.plates) && !item.skipVideoMasks) {
         const { cleanVideoWithMasks } = await import('../lib/video-mask');
         item.abort = new AbortController();
         try {
@@ -169,14 +195,14 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
           item.videoMasks = 'covered';
           item.videoObjects = r.maxObjects;
         } catch (e) {
-          if (!(e instanceof VideoCleanError) || e.reason !== 'cannotMask') throw e;
-          console.warn('cannot cover faces in this video here:', e.message);
-          item.videoMasks = 'unavailable';
+          // Covering was asked for but could not be done: deliver nothing until the user decides.
+          if (e instanceof VideoCleanError && e.reason === 'cannotMask') throw new VideoCleanError('cannotMask', e.message);
+          throw e;
         } finally {
           delete item.abort;
         }
       } else {
-        item.videoMasks = 'off';
+        item.videoMasks = item.skipVideoMasks ? 'unavailable' : 'off';
       }
       if (!bytes) {
         set('cleaning', 0);
@@ -206,10 +232,13 @@ export async function processItem(item: Item, opts: Options, detector: Detector,
       } catch (e) {
         console.error('detection failed', e);
         item.detectFailed = true;
+        // Keep whatever the passes that did work found.
+        if (e instanceof DetectionError) item.detections = e.partial;
       }
       if (opts.text) await ensureText(item, detector, (p) => set('detecting', p));
       set('cleaning');
       await renderImage(item, opts);
+      if (item.detectFailed && coveringRequested(opts)) item.needsReview = true;
     }
     set('ready');
   } catch (e) {

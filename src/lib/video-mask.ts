@@ -144,6 +144,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
         },
       },
     });
+    checkAbort(opts.signal);
     if (!conversion.isValid || !conversion.utilizedTracks.some((t) => t.isVideoTrack())) {
       throw new VideoCleanError('cannotMask', 'conversion not possible');
     }

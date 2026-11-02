@@ -11,17 +11,50 @@ export function parseXmpCoordinate(s: string): number | undefined {
   return ref === 'S' || ref === 'W' ? -v : v;
 }
 
+/** XMP packets larger than this are only checked for presence: no camera writes that much. */
+const MAX_XMP = 512 * 1024;
+
+/** Finds `ns:Name="value"` or `<ns:Name ...>value</ns:Name>` with plain string searches (linear time). */
 function prop(xmp: string, name: string): string | undefined {
-  // Attribute form: ns:Name="value"
-  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const attr = new RegExp(`${esc}\\s*=\\s*"([^"]*)"`).exec(xmp);
-  if (attr) return decode(attr[1]!);
-  // Element form: <ns:Name>value</ns:Name>, possibly wrapped in rdf:Seq/Alt/Bag with rdf:li items.
-  const el = new RegExp(`<${esc}(?:\\s[^>]*)?>([\\s\\S]*?)</${esc}>`).exec(xmp);
-  if (!el) return undefined;
-  const inner = el[1]!;
-  const items = [...inner.matchAll(/<rdf:li(?:\s[^>]*)?>([\s\S]*?)<\/rdf:li>/g)].map((m) => decode(m[1]!.trim()));
-  return items.length ? items.join(', ') : decode(inner.replace(/<[^>]+>/g, ' ').trim());
+  // Attribute form.
+  let at = xmp.indexOf(name);
+  while (at >= 0) {
+    const before = xmp.charCodeAt(at - 1);
+    let p = at + name.length;
+    while (xmp[p] === ' ') p++;
+    if (xmp[p] === '=' && before !== 60 /* < */ && before !== 47 /* / */) {
+      p++;
+      while (xmp[p] === ' ') p++;
+      const quote = xmp[p];
+      if (quote === '"' || quote === "'") {
+        const end = xmp.indexOf(quote, p + 1);
+        if (end > p) return decode(xmp.slice(p + 1, end));
+      }
+    }
+    at = xmp.indexOf(name, at + name.length);
+  }
+  // Element form, possibly wrapped in rdf:Seq/Alt/Bag with rdf:li items.
+  let open = xmp.indexOf(`<${name}`);
+  while (open >= 0) {
+    const after = xmp[open + name.length + 1];
+    if (after === '>' || after === ' ' || after === '\n' || after === '\t' || after === '\r') break;
+    open = xmp.indexOf(`<${name}`, open + 1);
+  }
+  if (open < 0) return undefined;
+  const gt = xmp.indexOf('>', open);
+  const close = xmp.indexOf(`</${name}>`, gt);
+  if (gt < 0 || close < 0) return undefined;
+  const inner = xmp.slice(gt + 1, close);
+  const items: string[] = [];
+  let li = inner.indexOf('<rdf:li');
+  while (li >= 0) {
+    const s = inner.indexOf('>', li);
+    const e = inner.indexOf('</rdf:li>', s);
+    if (s < 0 || e < 0) break;
+    items.push(decode(inner.slice(s + 1, e).trim()));
+    li = inner.indexOf('<rdf:li', e);
+  }
+  return items.length ? items.join(', ') : decode(inner.replace(/<[^>]*>/g, ' ').trim());
 }
 
 function decode(s: string): string {
@@ -37,6 +70,10 @@ function decode(s: string): string {
 export function inspectXmp(xmp: string, out: FindingList): void {
   if (!xmp.trim()) return;
   out.add('xmp');
+  if (xmp.length > MAX_XMP) {
+    out.add('otherMetadata', 'very large XMP');
+    return;
+  }
   const lat = prop(xmp, 'exif:GPSLatitude');
   const lon = prop(xmp, 'exif:GPSLongitude');
   if (lat && lon) {

@@ -152,9 +152,8 @@ export async function renderClean(img: DecodedImage, masks: Rect[], type: Output
     const y = Math.floor(m.y * scale);
     ctx.fillRect(x, y, Math.ceil((m.x + m.w) * scale) - x, Math.ceil((m.y + m.h) * scale) - y);
   }
-  // A canvas that was too big for the device comes back empty; check one masked/unmasked pixel exists.
-  const probe = ctx.getImageData(0, 0, 1, 1).data;
-  if (probe.length !== 4) throw new ImageCleanError('tooLarge', 'drawing surface failed');
+  // A canvas the device could not allocate silently ends up with no size.
+  if (canvas.width !== width || canvas.height !== height) throw new ImageCleanError('tooLarge', 'drawing surface failed');
 
   if (opts.extra) {
     const plan = planExtraTransform(width, height, cryptoRand);
