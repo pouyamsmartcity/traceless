@@ -37,7 +37,7 @@ async function takeSharedFiles(): Promise<void> {
 }
 
 window.addEventListener('paste', (e) => {
-  const files = Array.from(e.clipboardData?.files ?? []).filter((f) => /^(image|video)\//.test(f.type));
+  const files = Array.from(e.clipboardData?.files ?? []).filter((f) => /^(image|video|audio)\//.test(f.type));
   if (files.length) app.addFiles(files);
 });
 

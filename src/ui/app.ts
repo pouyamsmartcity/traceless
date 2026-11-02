@@ -1,20 +1,29 @@
 import { Detector } from '../lib/detect/detector';
+import { MASK_STYLES, type MaskStyle } from '../lib/masks';
 import { minutesLeft, secondsLeft } from '../lib/eta';
 import type { Rect } from '../lib/detect/geometry';
-import type { Finding } from '../lib/findings';
+import type { Finding, FindingId } from '../lib/findings';
 import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon } from './dom';
 import { openEditor } from './editor';
 import { MAX_SEAL_BYTES, looksSealed, openSealed, sealOriginal, type OpenResult } from './seal-ui';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
-import { ensurePeople, ensureText, locationRisks, lookForText, newItem, processItem, renderImage, sameOptions, sameVideoOptions, type Item, type Options } from './pipeline';
+import { ensurePeople, ensureText, locationRisks, lookForText, newItem, processItem, randomName, renderImage, sameOptions, upToDate, type Item, type Options } from './pipeline';
+
+type Theme = 'system' | 'light' | 'dark';
 
 interface Settings extends Options {
   lang: Lang;
+  theme: Theme;
+  /** Forget everything a while after the app goes to the background. */
+  autoWipe: boolean;
 }
 
+/** How long the app may stay in the background before "auto-forget" wipes it. */
+const AUTO_WIPE_MS = 5 * 60 * 1000;
+
 function loadSettings(): Settings {
-  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false, voice: false, people: false, maskStyle: 'smart' };
+  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false, voice: false, people: false, maskStyle: 'smart', light: false, theme: 'system', autoWipe: false };
   try {
     const raw = localStorage.getItem('pakkon-settings');
     if (raw) {
@@ -28,7 +37,10 @@ function loadSettings(): Settings {
         mute: s.mute === true,
         voice: s.voice === true,
         people: s.people === true,
-        maskStyle: s.maskStyle === 'black' || s.maskStyle === 'brand' ? s.maskStyle : 'smart',
+        light: s.light === true,
+        theme: s.theme === 'light' || s.theme === 'dark' ? s.theme : 'system',
+        autoWipe: s.autoWipe === true,
+        maskStyle: MASK_STYLES.includes(s.maskStyle as MaskStyle) ? (s.maskStyle as MaskStyle) : 'smart',
       };
     }
   } catch {
@@ -49,7 +61,7 @@ export class App {
   private settings = loadSettings();
   private readonly items: Item[] = [];
   private readonly cards = new Map<number, HTMLElement>();
-  private readonly previews = new Map<number, { key: string; el: HTMLElement; release: () => void }>();
+  private readonly previews = new Map<number, { key: string; el: HTMLElement; release: () => void; update?: (item: Item) => void }>();
   private readonly detector: Detector;
   private queue: Promise<void> = Promise.resolve();
   private places: Place[] | undefined;
@@ -76,6 +88,7 @@ export class App {
 
   start(): void {
     this.render();
+    this.watchBackground();
     // Prepare the detectors in the background so the first photo is quick.
     const idle = (cb: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(cb, { timeout: 3000 }) : setTimeout(cb, 1500));
     idle(() => {
@@ -183,7 +196,17 @@ export class App {
 
   private enqueue(item: Item): void {
     this.queue = this.queue
-      .then(() => processItem(item, this.settings, this.detector, () => this.updateCard(item)))
+      .then(async () => {
+        if (!this.items.includes(item)) return;
+        await processItem(item, this.settings, this.detector, () => this.updateCard(item));
+        // Wiped or removed meanwhile: forget what was made.
+        if (!this.items.includes(item)) {
+          if (item.output) URL.revokeObjectURL(item.output.url);
+          if (item.decoded) URL.revokeObjectURL(item.decoded.url);
+          delete item.output;
+          delete item.decoded;
+        }
+      })
       .then(() => this.refresh(item))
       .then(async () => {
         if (item.media !== 'image' || item.status !== 'ready' || this.settings.text) return;
@@ -197,12 +220,14 @@ export class App {
     const t = this.t;
     document.documentElement.lang = this.settings.lang;
     document.documentElement.dir = this.settings.lang === 'fa' ? 'rtl' : 'ltr';
+    if (this.settings.theme === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = this.settings.theme;
     document.title = `${t.appName} · ${t.tagline}`;
     clear(this.root);
 
     const input = h('input', {
       type: 'file',
-      accept: 'image/*,video/*',
+      accept: 'image/*,video/*,audio/*',
       multiple: true,
       className: 'visually-hidden',
       'data-testid': 'file-input',
@@ -234,36 +259,50 @@ export class App {
     });
     const touch = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 
-    const toggle = (key: 'faces' | 'plates' | 'text' | 'extra' | 'mute' | 'voice' | 'people', label: string) => {
+    /** An option as a chip: icon, label and a check mark when on. The real checkbox covers the chip. */
+    const chip = (key: 'faces' | 'plates' | 'text' | 'extra' | 'mute' | 'voice' | 'people' | 'light' | 'autoWipe', label: string, ic: string[]) => {
       const box = h('input', { type: 'checkbox', checked: this.settings[key], 'data-testid': `opt-${key}` });
       box.addEventListener('change', () => {
         this.settings[key] = box.checked;
         saveSettings(this.settings);
-        for (const it of this.items) if (it.media === 'video' && it.status === 'ready') this.updateCard(it);
+        if (key === 'autoWipe') return;
+        for (const it of this.items) if (it.media !== 'image' && it.status === 'ready') this.updateCard(it);
         void this.rerenderAll();
       });
-      return h('label', { className: 'switch' }, box, h('span', {}, label));
+      return h('label', { className: 'chip' }, box, h('span', { className: 'chip-icon' }, icon(ic, 18)), h('span', { className: 'chip-label' }, label), h('span', { className: 'chip-check' }, icon(ICONS.check, 14)));
     };
 
-    const langBtn = h('button', { type: 'button', className: 'btn ghost small', lang: this.settings.lang === 'fa' ? 'en' : 'fa' }, t.langSwitch);
+    const langBtn = h('button', { type: 'button', className: 'icon-btn text', lang: this.settings.lang === 'fa' ? 'en' : 'fa' }, t.langSwitch);
     langBtn.addEventListener('click', () => {
       this.settings.lang = this.settings.lang === 'fa' ? 'en' : 'fa';
       saveSettings(this.settings);
       this.cards.clear();
+      for (const p of this.previews.values()) p.release();
+      this.previews.clear();
       this.render();
     });
 
-    const isIos = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const themes: Theme[] = ['system', 'light', 'dark'];
+    const themeIcon = { system: ICONS.auto, light: ICONS.sun, dark: ICONS.moon }[this.settings.theme];
+    const themeBtn = h('button', { type: 'button', className: 'icon-btn', title: t.themeNames[this.settings.theme], 'aria-label': t.themeNames[this.settings.theme], 'data-testid': 'theme' }, icon(themeIcon, 20));
+    themeBtn.addEventListener('click', () => {
+      this.settings.theme = themes[(themes.indexOf(this.settings.theme) + 1) % themes.length]!;
+      saveSettings(this.settings);
+      this.render();
+    });
+
+    const wipeBtn = h('button', { type: 'button', className: 'icon-btn danger', title: t.wipe, 'aria-label': t.wipe, 'data-testid': 'wipe' }, icon(ICONS.wipe, 20));
+    wipeBtn.addEventListener('click', () => this.wipeAll());
+
     const standalone = window.matchMedia?.('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
     let installEl: HTMLElement | null = null;
     if (!standalone && this.installPrompt) {
-      installEl = h('button', { type: 'button', className: 'btn ghost small' }, t.install);
+      installEl = h('button', { type: 'button', className: 'btn ghost small install' }, icon(ICONS.save, 18), t.install);
       installEl.addEventListener('click', () => {
         void this.installPrompt?.prompt?.();
         this.installPrompt = undefined;
+        this.render();
       });
-    } else if (!standalone && isIos) {
-      installEl = h('p', { className: 'hint' }, t.installIos);
     }
 
     this.listEl = h('section', { className: 'items', 'aria-live': 'polite' });
@@ -273,40 +312,48 @@ export class App {
       this.updateCard(item);
     }
     this.bulkEl = h('div', { className: 'bulk' });
+    this.toastEl = h('div', { className: 'toast', role: 'status', 'aria-live': 'polite', 'data-testid': 'toast' });
 
-    const dropZone = h(
+    const hero = h(
       'section',
-      { className: 'picker' },
-      h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
-      touch ? h('label', { className: 'pick-btn secondary', 'data-testid': 'camera-button' }, camera, icon(ICONS.camera, 24), h('span', {}, t.takePhoto)) : null,
+      { className: 'hero picker' },
+      h('div', { className: 'hero-art', 'aria-hidden': 'true' }, icon(ICONS.shield, 40)),
+      h('h2', { className: 'hero-title' }, t.heroTitle),
+      h('p', { className: 'hero-text' }, t.heroText),
+      h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 26), h('span', {}, t.pickAny)),
+      touch ? h('label', { className: 'pick-btn secondary', 'data-testid': 'camera-button' }, camera, icon(ICONS.camera, 22), h('span', {}, t.takePhoto)) : null,
       touch ? h('p', { className: 'hint small' }, t.takePhotoHint) : h('p', { className: 'hint' }, t.pickHint),
+    );
+    this.bindDrop(hero);
+
+    const options = h(
+      'section',
+      { className: 'panel options' },
+      h('p', { className: 'group' }, t.groupCover),
       h(
         'div',
-        { className: 'options' },
-        h('p', { className: 'group' }, t.groupCover),
-        toggle('faces', t.optFaces),
-        toggle('plates', t.optPlates),
-        toggle('text', t.optText),
-        toggle('people', t.optPeople),
-        h('p', { className: 'group' }, t.groupStyle),
-        this.stylePicker(),
-        h('p', { className: 'group' }, t.groupSound),
-        toggle('voice', t.optVoice),
-        toggle('mute', t.optMute),
-        h('p', { className: 'group' }, t.groupMore),
-        toggle('extra', t.optExtra),
-        h('p', { className: 'hint small' }, t.extraHint),
+        { className: 'chips' },
+        chip('faces', t.optFaces, ICONS.face),
+        chip('plates', t.optPlates, ICONS.car),
+        chip('text', t.optText, ICONS.text),
+        chip('people', t.optPeople, ICONS.person),
       ),
+      h('p', { className: 'group' }, t.groupStyle),
+      this.stylePicker(),
+      h('p', { className: 'group' }, t.groupSoundAll),
+      h('div', { className: 'chips' }, chip('voice', t.optVoice, ICONS.mic), chip('mute', t.optMute, ICONS.muteIcon)),
+      h('p', { className: 'group' }, t.groupMore),
+      h('div', { className: 'chips' }, chip('light', t.optLight, ICONS.feather), chip('extra', t.optExtra, ICONS.shield), chip('autoWipe', t.optAutoWipe, ICONS.timer)),
+      h('p', { className: 'hint small' }, t.extraHint),
     );
-    this.bindDrop(dropZone);
 
     append(
       this.root,
       h(
         'header',
         { className: 'top' },
-        h('div', { className: 'brand' }, h('span', { className: 'logo' }, icon(ICONS.eraser, 26)), h('div', {}, h('h1', {}, t.appName), h('p', {}, t.tagline))),
-        langBtn,
+        h('div', { className: 'brand' }, h('span', { className: 'logo' }, icon(ICONS.eraser, 24)), h('div', {}, h('h1', {}, t.appName), h('p', {}, t.tagline))),
+        h('div', { className: 'top-actions' }, themeBtn, wipeBtn, langBtn),
       ),
       h(
         'p',
@@ -314,11 +361,13 @@ export class App {
         icon(ICONS.lock, 16),
         h('span', {}, t.offlineBadge, this.offlineReady ? h('span', { className: 'ready' }, ` · ${t.offlineReady}`) : null),
       ),
-      dropZone,
+      this.introCard(standalone),
+      hero,
       this.bulkEl,
       this.listEl,
-      h('details', { className: 'info' }, h('summary', {}, t.howTitle), h('ul', {}, ...t.how.map((s) => h('li', {}, s)))),
-      h('details', { className: 'info' }, h('summary', {}, t.limitsTitle), h('ul', {}, ...t.limits.map((s) => h('li', {}, s)))),
+      options,
+      h('details', { className: 'info' }, h('summary', {}, t.howTitle), h('ul', {}, ...t.how.map((x) => h('li', {}, x)))),
+      h('details', { className: 'info' }, h('summary', {}, t.limitsTitle), h('ul', {}, ...t.limits.map((x) => h('li', {}, x)))),
       h('label', { className: 'link open-sealed' }, sealedInput, t.openSealedLink),
       installEl,
       h(
@@ -327,15 +376,104 @@ export class App {
         h('p', {}, t.footer, ' · ', h('a', { href: 'https://www.pouyam.com', rel: 'noopener', target: '_blank' }, 'pouyam.com')),
         h('p', { className: 'small' }, t.dataCredit),
       ),
+      this.toastEl,
     );
     this.updateBulk();
+  }
+
+  private toastEl: HTMLElement | undefined;
+
+  private toast(message: string): void {
+    const el = this.toastEl;
+    if (!el) return;
+    el.textContent = message;
+    el.classList.add('show');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+  }
+
+  private toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** First visit: three short steps, and how to install the app on this phone. Dismissed for good. */
+  private introCard(standalone: boolean): HTMLElement | null {
+    let done = false;
+    try {
+      done = localStorage.getItem('pakkon-intro') === 'done';
+    } catch {
+      // Storage blocked: show it (it can be closed for this visit).
+    }
+    if (done || this.introClosed) return null;
+    const t = this.t;
+    const isIos = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isAndroid = /Android/.test(navigator.userAgent);
+    const close = h('button', { type: 'button', className: 'btn primary small', 'data-testid': 'intro-done' }, t.introDone);
+    const card = h(
+      'section',
+      { className: 'intro', 'data-testid': 'intro' },
+      h('h2', {}, icon(ICONS.sparkle, 20), t.introTitle),
+      h('ol', { className: 'steps' }, ...t.introSteps.map((x, i) => h('li', {}, h('span', { className: 'step-n' }, formatNumber(this.settings.lang, i + 1)), h('span', {}, x)))),
+      !standalone && isIos ? h('p', { className: 'hint small' }, t.introInstallIos) : null,
+      !standalone && isAndroid ? h('p', { className: 'hint small' }, t.introInstallAndroid) : null,
+      close,
+    );
+    close.addEventListener('click', () => {
+      this.introClosed = true;
+      try {
+        localStorage.setItem('pakkon-intro', 'done');
+      } catch {
+        // Not important.
+      }
+      card.classList.add('leaving');
+      setTimeout(() => card.remove(), 250);
+    });
+    return card;
+  }
+
+  private introClosed = false;
+
+  /**
+   * Forgets everything in this tab at once: originals, safe copies, opened sealed files and previews.
+   * For when the phone may be taken; also run by "auto-forget".
+   */
+  wipeAll(): void {
+    for (const item of this.items) {
+      item.abort?.abort();
+      if (item.output) URL.revokeObjectURL(item.output.url);
+      if (item.decoded) URL.revokeObjectURL(item.decoded.url);
+    }
+    this.items.length = 0;
+    for (const p of this.previews.values()) p.release();
+    this.previews.clear();
+    this.cards.clear();
+    for (const o of this.opened) if (o.url) URL.revokeObjectURL(o.url);
+    this.opened.length = 0;
+    clear(this.listEl);
+    this.updateBulk();
+    this.toast(this.t.wiped);
+  }
+
+  /** Auto-forget: wipe when the app has been in the background for a while. */
+  watchBackground(): void {
+    let hiddenAt: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        if (!this.settings.autoWipe) return;
+        hiddenAt = Date.now();
+        timer = setTimeout(() => this.settings.autoWipe && this.wipeAll(), AUTO_WIPE_MS);
+      } else {
+        clearTimeout(timer);
+        if (hiddenAt !== undefined && this.settings.autoWipe && Date.now() - hiddenAt >= AUTO_WIPE_MS) this.wipeAll();
+        hiddenAt = undefined;
+      }
+    });
   }
 
   /** Three small swatches to choose how covers look. */
   private stylePicker(): HTMLElement {
     const t = this.t;
     const row = h('div', { className: 'styles', role: 'radiogroup', 'aria-label': t.groupStyle });
-    for (const style of ['smart', 'black', 'brand'] as const) {
+    for (const style of MASK_STYLES) {
       const input = h('input', { type: 'radio', name: 'mask-style', value: style, checked: this.settings.maskStyle === style, 'data-testid': `style-${style}` });
       input.addEventListener('change', () => {
         if (!input.checked) return;
@@ -443,6 +581,7 @@ export class App {
   }
 
   private updateCard(item: Item): void {
+    if (!this.items.includes(item)) return;
     const t = this.t;
     const lang = this.settings.lang;
     const card = this.cardFor(item);
@@ -455,6 +594,7 @@ export class App {
     const key = `${item.status}|${item.output?.url ?? ''}|${this.settings.lang}`;
     const cached = this.previews.get(item.id);
     if (cached && cached.key === key) {
+      cached.update?.(item);
       card.appendChild(cached.el);
     } else {
       if (cached) cached.release();
@@ -490,7 +630,9 @@ export class App {
           });
           return b;
         };
-        body.appendChild(h('div', { className: 'actions' }, choose('mute', t.voiceInsteadMute, 'voice-mute'), choose('keep', t.voiceKeep, 'voice-keep')));
+        body.appendChild(
+          h('div', { className: 'actions' }, item.media === 'audio' ? null : choose('mute', t.voiceInsteadMute, 'voice-mute'), choose('keep', t.voiceKeep, 'voice-keep')),
+        );
       }
       if (item.error === 'videoMask') {
         const go = h('button', { type: 'button', className: 'btn', 'data-testid': 'continue-without' }, t.continueWithout);
@@ -525,7 +667,14 @@ export class App {
     }
 
     if (item.status === 'ready' && item.output) {
-      if (item.media === 'image') {
+      body.appendChild(this.reportChips(item));
+      body.appendChild(
+        h('p', { className: 'size-line', 'data-testid': 'size-line' }, icon(ICONS.data, 15), t.sizeLine(formatSize(lang, item.file.size, t), formatSize(lang, item.output.blob.size, t))),
+      );
+      if (item.media === 'audio') {
+        body.appendChild(h('p', { className: 'note', 'data-testid': 'audio-voice-note' }, item.audioVoiced ? t.audioVoiced : t.audioKeptVoice));
+        if (!upToDate(item, this.settings)) body.appendChild(this.rebuildButton(item, t.rebuildAudio));
+      } else if (item.media === 'image') {
         // Count from the options this copy was really made with.
         const used = item.renderedWith ?? this.settings;
         const count = (kind: 'face' | 'plate' | 'text' | 'person') => item.detections.filter((d, i) => d.kind === kind && !item.removed.has(i)).length;
@@ -562,17 +711,8 @@ export class App {
         if (item.videoMadeWith?.mute) body.appendChild(h('p', { className: 'note', 'data-testid': 'muted-note' }, t.videoMuted));
         if (item.videoMadeWith?.voice && item.audioKept) body.appendChild(h('p', { className: 'note', 'data-testid': 'voice-note' }, t.videoVoiced));
         if (!item.videoMadeWith?.mute && item.audioKept === false) body.appendChild(h('p', { className: 'note', 'data-testid': 'no-sound-note' }, t.videoNoSound));
-        if (!sameVideoOptions(item, this.settings)) {
-          const again = h('button', { type: 'button', className: 'btn ghost small', 'data-testid': 'rebuild' }, t.rebuildVideo);
-          again.addEventListener('click', () => {
-            if (item.output) URL.revokeObjectURL(item.output.url);
-            delete item.output;
-            item.status = 'queued';
-            this.updateCard(item);
-            this.enqueue(item);
-          });
-          body.appendChild(again);
-        }
+        if (item.videoMadeWith?.light && item.lightApplied === false) body.appendChild(h('p', { className: 'note', 'data-testid': 'light-unavailable' }, t.lightUnavailable));
+        if (!upToDate(item, this.settings)) body.appendChild(this.rebuildButton(item, t.rebuildVideo));
       }
       if (item.needsReview) body.appendChild(this.reviewGate(item));
       else body.appendChild(this.actions(item));
@@ -596,6 +736,55 @@ export class App {
     this.updateBulk();
   }
 
+  private rebuildButton(item: Item, label: string): HTMLElement {
+    const again = h('button', { type: 'button', className: 'btn ghost small', 'data-testid': 'rebuild' }, label);
+    again.addEventListener('click', () => {
+      if (item.output) URL.revokeObjectURL(item.output.url);
+      delete item.output;
+      item.status = 'queued';
+      this.updateCard(item);
+      this.enqueue(item);
+    });
+    return again;
+  }
+
+  /** At a glance: which kinds of hidden data were removed, and what was covered or changed. */
+  private reportChips(item: Item): HTMLElement {
+    const t = this.t;
+    const lang = this.settings.lang;
+    const row = h('div', { className: 'report', 'data-testid': 'report' });
+    const add = (kind: string, ic: string[], label: string) => row.appendChild(h('span', { className: `report-chip ${kind}`, 'data-kind': kind }, icon(ic, 15), label));
+    const ids = new Set(item.findings.map((f) => f.id));
+    const has = (...xs: FindingId[]) => xs.some((x) => ids.has(x));
+    if (has('gps', 'videoLocation', 'cityName')) add('location', ICONS.pin, t.report.location);
+    if (has('deviceModel', 'serialNumber', 'lens', 'software', 'uniqueId', 'makerNotes', 'owner')) add('device', ICONS.phone, t.report.device);
+    if (has('dateTaken', 'timeZone')) add('time', ICONS.clock, t.report.time);
+    const others = item.findings.filter(
+      (f) => !['gps', 'videoLocation', 'cityName', 'deviceModel', 'serialNumber', 'lens', 'software', 'uniqueId', 'makerNotes', 'owner', 'dateTaken', 'timeZone'].includes(f.id),
+    );
+    if (others.length) add('other', ICONS.data, t.report.other);
+    if (!item.findings.length) add('clean', ICONS.check, t.report.clean);
+    const n = (x: number) => formatNumber(lang, x);
+    if (item.media === 'image') {
+      const used = item.renderedWith ?? this.settings;
+      const count = (kind: 'face' | 'plate' | 'text' | 'person') => item.detections.filter((d, i) => d.kind === kind && !item.removed.has(i)).length;
+      const faces = used.faces ? count('face') : 0;
+      const plates = used.plates ? count('plate') : 0;
+      const texts = used.text ? count('text') : 0;
+      const people = used.people ? count('person') : 0;
+      if (faces) add('cover', ICONS.face, t.report.faces(n(faces)));
+      if (plates) add('cover', ICONS.car, t.report.plates(n(plates)));
+      if (texts) add('cover', ICONS.text, t.report.texts(n(texts)));
+      if (people) add('cover', ICONS.person, t.report.people(n(people)));
+    } else if (item.media === 'video') {
+      if (item.videoMadeWith?.mute) add('sound', ICONS.muteIcon, t.report.muted);
+      else if (item.videoMadeWith?.voice && item.audioKept) add('sound', ICONS.mic, t.report.voice);
+    } else if (item.audioVoiced) {
+      add('sound', ICONS.mic, t.report.voice);
+    }
+    return row;
+  }
+
   /** Shown instead of Share/Save when automatic covering failed: cover by hand, or confirm. */
   private reviewGate(item: Item): HTMLElement {
     const t = this.t;
@@ -616,46 +805,92 @@ export class App {
     return h('div', { className: 'review', role: 'alert' }, h('p', { className: 'warn' }, t.reviewNeeded), row);
   }
 
-  private buildPreview(item: Item): { el: HTMLElement; release: () => void } {
+  private buildPreview(item: Item): { el: HTMLElement; release: () => void; update?: (item: Item) => void } {
     const t = this.t;
     const wrap = h('div', { className: 'preview-wrap' });
-    let preview: HTMLElement;
     if (item.output && item.media === 'image') {
-      preview = h('img', { src: item.output.url, alt: t.statusReady, className: 'preview', 'data-testid': 'output-image' });
-    } else if (item.output && item.media === 'video') {
-      preview = h('video', { src: item.output.url, controls: true, playsinline: true, preload: 'metadata', className: 'preview' });
-    } else {
-      preview = h('div', { className: 'preview placeholder' }, item.status === 'error' ? icon(ICONS.alert, 32) : h('div', { className: 'spinner' }));
+      const img = h('img', { src: item.output.url, alt: t.statusReady, className: 'preview', 'data-testid': 'output-image' });
+      wrap.appendChild(img);
+      // Drag across the picture to see the original beside the safe copy; letting go slides it away again.
+      // The original is only ever on this screen; the safe copy's link never changes.
+      if (item.status === 'ready' && item.decoded) return { el: this.compareSlider(wrap, item.decoded.url), release: () => wrap.removeAttribute('data-revealing') };
+      return { el: wrap, release: () => undefined };
     }
-    wrap.appendChild(preview);
-    let release = (): void => undefined;
-    // Hold to see the original in place of the safe copy (only on this screen; it is never shared).
-    if (item.status === 'ready' && item.output && item.media === 'image' && item.decoded && preview instanceof HTMLImageElement) {
-      const img = preview;
-      const safeUrl = item.output.url;
-      const origUrl = item.decoded.url;
-      const compare = h('button', { type: 'button', className: 'btn small compare', 'data-testid': 'compare' }, t.holdToCompare);
-      const show = (orig: boolean) => {
-        img.src = orig ? origUrl : safeUrl;
-        compare.classList.toggle('active', orig);
+    if (item.output && item.media === 'video') {
+      const video = h('video', { src: item.output.url, controls: true, playsinline: true, preload: 'metadata', className: 'preview' });
+      wrap.appendChild(video);
+      const strip = h('div', { className: 'filmstrip', 'data-testid': 'filmstrip', 'aria-label': t.filmstripTitle });
+      const box = h('div', { className: 'filmstrip-box' }, h('p', { className: 'hint small' }, t.filmstripTitle), strip);
+      let cancelled = false;
+      void buildFilmstrip(item.output.url, strip, video, () => cancelled);
+      return { el: h('div', {}, wrap, box), release: () => (cancelled = true) };
+    }
+    if (item.output && item.media === 'audio') {
+      const canvas = h('canvas', { className: 'waveform', width: 640, height: 120, 'aria-hidden': 'true', 'data-testid': 'waveform' });
+      const audio = h('audio', { src: item.output.url, controls: true, preload: 'metadata', className: 'audio-player' });
+      const box = h('div', { className: 'audio-preview' }, h('span', { className: 'audio-icon' }, icon(ICONS.mic, 28)), canvas, audio);
+      wrap.appendChild(box);
+      void drawWaveform(item.output.blob, canvas);
+      return { el: wrap, release: () => undefined };
+    }
+    // While working: a ring that fills with the progress (or a spinner before progress is known).
+    const ph = h('div', { className: 'preview placeholder' });
+    wrap.appendChild(ph);
+    const update = (it: Item) => {
+      clear(ph);
+      if (it.status === 'error') ph.appendChild(icon(ICONS.alert, 32));
+      else if (it.progress !== undefined && it.progress > 0) ph.appendChild(progressRing(it.progress, this.settings.lang));
+      else ph.appendChild(h('div', { className: 'spinner' }));
+    };
+    update(item);
+    return { el: wrap, release: () => undefined, update };
+  }
+
+  /** Before/after: the original appears on one side of a divider that follows the finger, then slides away. */
+  private compareSlider(wrap: HTMLElement, originalUrl: string): HTMLElement {
+    const t = this.t;
+    const orig = h('img', { src: originalUrl, alt: '', className: 'original-layer', 'aria-hidden': 'true', draggable: 'false' });
+    const handle = h('button', { type: 'button', className: 'compare-handle', 'data-testid': 'compare', 'aria-label': t.dragToCompare }, h('span', { className: 'grip' }), h('span', { className: 'compare-label' }, t.dragToCompare));
+    wrap.classList.add('compare');
+    wrap.append(orig, h('div', { className: 'divider', 'aria-hidden': 'true' }), handle);
+    const setAt = (clientX: number) => {
+      const r = wrap.getBoundingClientRect();
+      const f = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+      wrap.style.setProperty('--reveal', `${(f * 100).toFixed(2)}%`);
+    };
+    const end = () => {
+      wrap.removeAttribute('data-revealing');
+      wrap.style.setProperty('--reveal', '0%');
+    };
+    const begin = (e: PointerEvent) => {
+      e.preventDefault();
+      wrap.setAttribute('data-revealing', 'true');
+      setAt(e.clientX);
+      const move = (ev: PointerEvent) => setAt(ev.clientX);
+      window.addEventListener('pointermove', move);
+      const stop = () => {
+        window.removeEventListener('pointermove', move);
+        end();
       };
-      compare.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        show(true);
-        // Whatever happens to the button, letting go anywhere shows the safe copy again.
-        window.addEventListener('pointerup', () => show(false), { once: true });
-        window.addEventListener('pointercancel', () => show(false), { once: true });
-      });
-      for (const ev of ['pointerup', 'pointercancel']) compare.addEventListener(ev, () => show(false));
-      compare.addEventListener('keydown', (e) => {
-        if (e.key === ' ' || e.key === 'Enter') show(true);
-      });
-      compare.addEventListener('keyup', () => show(false));
-      compare.addEventListener('blur', () => show(false));
-      wrap.appendChild(h('div', { className: 'compare-row' }, compare));
-      release = () => show(false);
-    }
-    return { el: wrap, release };
+      // Letting go anywhere (or the browser taking the gesture) shows the safe copy again.
+      window.addEventListener('pointerup', stop, { once: true });
+      window.addEventListener('pointercancel', stop, { once: true });
+    };
+    handle.addEventListener('pointerdown', begin);
+    wrap.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (e.target === handle || handle.contains(e.target as Node)) return;
+      begin(e);
+    });
+    handle.addEventListener('keydown', (e) => {
+      if (e.key !== ' ' && e.key !== 'Enter') return;
+      e.preventDefault();
+      wrap.setAttribute('data-revealing', 'true');
+      wrap.style.setProperty('--reveal', '50%');
+    });
+    handle.addEventListener('keyup', end);
+    handle.addEventListener('blur', end);
+    return wrap;
   }
 
   private actions(item: Item): HTMLElement {
@@ -776,6 +1011,7 @@ export class App {
     if (item.decoded) URL.revokeObjectURL(item.decoded.url);
     this.cards.get(item.id)?.remove();
     this.cards.delete(item.id);
+    this.previews.get(item.id)?.release();
     this.previews.delete(item.id);
     this.updateBulk();
   }
@@ -784,15 +1020,31 @@ export class App {
     if (!this.bulkEl) return;
     clear(this.bulkEl);
     // Only copies that are ready to send: not waiting for a check, not made with outdated switches.
-    const ready = this.items.filter(
-      (i) => i.status === 'ready' && i.output && !i.needsReview && (i.media === 'image' || sameVideoOptions(i, this.settings)),
-    );
+    const ready = this.items.filter((i) => i.status === 'ready' && i.output && !i.needsReview && upToDate(i, this.settings));
     if (ready.length < 2) return;
     const files = ready.map((i) => new File([i.output!.blob], i.output!.name, { type: i.output!.blob.type }));
-    if (!canShareFiles(files)) return;
-    const btn = h('button', { type: 'button', className: 'btn primary wide', 'data-testid': 'share-all' }, icon(ICONS.share), `${this.t.shareAll} (${formatNumber(this.settings.lang, ready.length)})`);
-    btn.addEventListener('click', () => void shareOrSave(files));
-    this.bulkEl.appendChild(btn);
+    const n = formatNumber(this.settings.lang, ready.length);
+    if (canShareFiles(files)) {
+      const btn = h('button', { type: 'button', className: 'btn primary wide', 'data-testid': 'share-all' }, icon(ICONS.share), `${this.t.shareAll} (${n})`);
+      btn.addEventListener('click', () => void shareOrSave(files));
+      this.bulkEl.appendChild(btn);
+    }
+    // One ZIP file with every safe copy (stored as is, no real dates inside).
+    const zip = h('button', { type: 'button', className: 'btn wide', 'data-testid': 'save-zip' }, icon(ICONS.zip), `${this.t.saveZip} (${n})`);
+    zip.addEventListener('click', async () => {
+      const { makeZip } = await import('../lib/zip');
+      const entries = await Promise.all(ready.map(async (i) => ({ name: i.output!.name, data: new Uint8Array(await i.output!.blob.arrayBuffer()) })));
+      let blob: Blob;
+      try {
+        blob = makeZip(entries);
+      } catch (e) {
+        console.error(e);
+        alert(this.t.errTooLarge);
+        return;
+      }
+      saveBlob(blob, randomName('zip').replace(/^img-/, 'pakkon-'));
+    });
+    this.bulkEl.appendChild(zip);
   }
 }
 
@@ -831,13 +1083,126 @@ async function shareOrSave(files: File[], saveOnly = false): Promise<void> {
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return; // the user closed the share sheet
     // Sharing not allowed here (for example the click was too long ago): fall back to saving.
-    for (const f of files) {
-      const url = URL.createObjectURL(f);
-      const a = h('a', { href: url, download: f.name });
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    for (const f of files) saveBlob(f, f.name);
+  }
+}
+
+function saveBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: name, 'data-testid': 'download-link' });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** File size in KB or MB, in the interface language's digits. */
+function formatSize(lang: Lang, bytes: number, t: Strings): string {
+  const mb = bytes >= 1024 * 1024;
+  const v = mb ? bytes / (1024 * 1024) : Math.max(1, Math.round(bytes / 1024));
+  const num = new Intl.NumberFormat(lang === 'fa' ? 'fa-IR' : 'en-US', { maximumFractionDigits: mb ? 1 : 0 }).format(v);
+  return `${num} ${mb ? t.units.mb : t.units.kb}`;
+}
+
+/** A ring that fills with progress, with the percentage in the middle. */
+function progressRing(fraction: number, lang: Lang): SVGSVGElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 64 64');
+  svg.setAttribute('class', 'ring');
+  svg.setAttribute('data-testid', 'progress-ring');
+  const r = 26;
+  const len = 2 * Math.PI * r;
+  const track = document.createElementNS(NS, 'circle');
+  for (const [k, v] of Object.entries({ cx: '32', cy: '32', r: String(r), class: 'ring-track' })) track.setAttribute(k, v);
+  const bar = document.createElementNS(NS, 'circle');
+  for (const [k, v] of Object.entries({ cx: '32', cy: '32', r: String(r), class: 'ring-bar', 'stroke-dasharray': `${len}`, 'stroke-dashoffset': `${len * (1 - Math.min(1, Math.max(0, fraction)))}` })) {
+    bar.setAttribute(k, v);
+  }
+  const text = document.createElementNS(NS, 'text');
+  for (const [k, v] of Object.entries({ x: '32', y: '37', 'text-anchor': 'middle', class: 'ring-text' })) text.setAttribute(k, v);
+  text.textContent = `${formatNumber(lang, Math.round(fraction * 100))}${lang === 'fa' ? '٪' : '%'}`;
+  svg.append(track, bar, text);
+  return svg;
+}
+
+/** Frames from across the safe video, to check the covers quickly; tapping one jumps the player there. */
+async function buildFilmstrip(url: string, strip: HTMLElement, player: HTMLVideoElement, cancelled: () => boolean, frames = 8): Promise<void> {
+  const v = document.createElement('video');
+  v.muted = true;
+  v.preload = 'auto';
+  v.src = url;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      v.onloadeddata = () => resolve();
+      v.onerror = () => reject(new Error('cannot read video'));
+    });
+    const d = v.duration;
+    if (!Number.isFinite(d) || d <= 0) return;
+    const w = 160;
+    const hgt = Math.max(1, Math.round((w * v.videoHeight) / Math.max(1, v.videoWidth)));
+    for (let i = 0; i < frames; i++) {
+      if (cancelled()) return;
+      const time = (d * (i + 0.5)) / frames;
+      v.currentTime = time;
+      await new Promise<void>((resolve) => (v.onseeked = () => resolve()));
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = hgt;
+      c.getContext('2d')?.drawImage(v, 0, 0, w, hgt);
+      const b = h('button', { type: 'button', className: 'frame', 'data-time': time.toFixed(2) }, c);
+      b.addEventListener('click', () => {
+        player.currentTime = time;
+        player.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+      strip.appendChild(b);
     }
+  } catch (e) {
+    console.warn('filmstrip unavailable', e);
+  } finally {
+    v.removeAttribute('src');
+    v.load();
+  }
+}
+
+/** Bars showing the loudness of the recording over time (drawn from the safe copy). */
+async function drawWaveform(blob: Blob, canvas: HTMLCanvasElement): Promise<void> {
+  const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) return;
+  const ac = new Ctx();
+  try {
+    const buf = await ac.decodeAudioData(await blob.arrayBuffer());
+    const data = buf.getChannelData(0);
+    const bars = 64;
+    const per = Math.max(1, Math.floor(data.length / bars));
+    const levels: number[] = [];
+    for (let b = 0; b < bars; b++) {
+      let sum = 0;
+      for (let i = b * per; i < Math.min(data.length, (b + 1) * per); i++) sum += data[i]! * data[i]!;
+      levels.push(Math.sqrt(sum / per));
+    }
+    const max = Math.max(1e-6, ...levels);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const css = getComputedStyle(canvas);
+    const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    grad.addColorStop(0, css.getPropertyValue('--brand').trim() || '#126354');
+    grad.addColorStop(1, css.getPropertyValue('--brand-2').trim() || '#2fa58c');
+    ctx.fillStyle = grad;
+    const bw = canvas.width / bars;
+    levels.forEach((l, i) => {
+      const bh = Math.max(4, (l / max) * (canvas.height - 8));
+      const x = i * bw + bw * 0.2;
+      const y = (canvas.height - bh) / 2;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, bw * 0.6, bh, bw * 0.3);
+      else ctx.rect(x, y, bw * 0.6, bh);
+      ctx.fill();
+    });
+    canvas.dataset.drawn = 'true';
+  } catch (e) {
+    console.warn('waveform unavailable', e);
+  } finally {
+    void ac.close();
   }
 }

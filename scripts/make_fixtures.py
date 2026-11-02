@@ -195,12 +195,33 @@ def make_videos():
     os.remove(plain)
 
 
+def make_audio():
+    """Voice notes with the tags phones and messengers write: place-named title, speaker, date, place, app, cover."""
+    tone = ['-f', 'lavfi', '-i', 'sine=frequency=220:duration=2:sample_rate=48000']
+    cover = os.path.join(OUT, '_cover.png')
+    scene(64, 64, (200, 80, 60)).save(cover)
+    tags = ['-metadata', 'title=Enghelab Square 3', '-metadata', 'artist=Reza Example',
+            '-metadata', 'date=2026-09-21T18:30:00', '-metadata', 'comment=recorded near the bazaar',
+            '-metadata', 'encoder=FakeRecorder 2.0']
+    run(['ffmpeg', '-v', 'error', '-y', *tone, '-i', cover, '-map', '0:a', '-map', '1:v', '-c:a', 'aac', '-b:a', '64k',
+         '-c:v', 'mjpeg', '-disposition:v', 'attached_pic', *tags,
+         '-metadata', 'location=' + f'+{LAT:.4f}+{LON:08.4f}/',
+         '-metadata', 'com.apple.quicktime.location.ISO6709=' + f'+{LAT:.4f}+{LON:08.4f}+1190.000/',
+         '-movflags', '+use_metadata_tags', os.path.join(OUT, 'voice-memo.m4a')])
+    run(['ffmpeg', '-v', 'error', '-y', *tone, '-i', cover, '-map', '0:a', '-map', '1:v', '-c:a', 'libmp3lame',
+         '-b:a', '64k', '-c:v', 'png', '-disposition:v', 'attached_pic', '-id3v2_version', '3', *tags,
+         os.path.join(OUT, 'voice-note.mp3')])
+    run(['ffmpeg', '-v', 'error', '-y', *tone, '-c:a', 'libopus', '-b:a', '32k', *tags,
+         os.path.join(OUT, 'voice-note.ogg')])
+    os.remove(cover)
+
+
 def main():
     if not EXIFTOOL:
         sys.exit('ExifTool not found. Install it or set EXIFTOOL=/path/to/exiftool')
     os.makedirs(OUT, exist_ok=True)
     only = sys.argv[1:]
-    for name, fn in (('jpeg', make_jpeg), ('png', make_png), ('webp', make_webp), ('edited', make_edited), ('honest', make_honest), ('videos', make_videos)):
+    for name, fn in (('jpeg', make_jpeg), ('png', make_png), ('webp', make_webp), ('edited', make_edited), ('honest', make_honest), ('videos', make_videos), ('audio', make_audio)):
         if not only or name in only:
             fn()
     print('Fixtures written to', OUT)

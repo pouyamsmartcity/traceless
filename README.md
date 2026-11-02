@@ -13,8 +13,11 @@ which device a picture was taken, and covers faces and licence plates with solid
 - **Faces and plates covered, in photos and videos.** On-device detection finds faces (also small faces in crowds)
   and licence plates, including Iranian plates. Covers are solid fills, because blur and pixelation can sometimes be
   reversed, drawn in clean shapes: ovals for faces, rounded shapes for plates and text, and each person's own
-  silhouette (found by a segmentation network) when whole people are covered. Three looks: "smart" (a colour taken
-  from around the cover, so it sits naturally in the picture), black, and Pakkon's green with its eraser mark. You can add or remove covers by hand. In videos, every frame is covered, following moving people.
+  silhouette (found by a segmentation network) when whole people are covered. Four looks: "smart" (a colour taken
+  from around the cover, so it sits naturally in the picture), black, Pakkon's green with its eraser mark, and a
+  friendly "sticker" (faces become a solid yellow smiley). You can add or remove covers by hand, and drag across a
+  picture to compare it with the original. In videos, every face is tracked and covered on every frame; a filmstrip
+  of the safe video lets you check the covers quickly.
 - **Whole people covered on request** (body, clothes, hair), for when clothes or hair could identify someone
   (YOLOX-s person detection, Apache-2.0). In videos the silhouette follows each person between sampled frames.
 - **Text covered on request.** Street and shop signs, names and numbers (Persian and Latin script) can be covered
@@ -23,6 +26,14 @@ which device a picture was taken, and covers faces and licence plates with solid
   pattern (smaller, very slightly turned and trimmed picture, fresh grain).
 - **Change voices or remove the sound** in videos on request (voices and background sounds can identify people
   and places). Voices are made deeper by a random, slowly drifting factor: this stops casual listeners, not someone who works to undo it; words and accents stay. Removing the sound is the safe choice.
+- **Voice notes and recordings.** Voice memos and messenger voice notes (M4A, MP3, OGG/Opus, WAV and more) can carry
+  a place-named title, the speaker's name, the date, the recording app, a location and a cover picture. Pakkon
+  re-encodes the sound into a fresh M4A that holds nothing else, and can change the voice too.
+- **Smaller files on request** for slow or expensive connections: photos at most 1600 pixels, videos at most 1280
+  pixels at a lower bitrate, voice notes at 32 kbit/s. Every card shows the size before and after.
+- **Wipe in one tap.** The bin in the header forgets every original and copy in the app at once; "auto-forget" does
+  it by itself five minutes after the app goes to the background.
+- **Save all as one ZIP** (files stored as they are, with no real dates inside), or share them all at once.
 - **Seal the original** (optional): lock the untouched original with a passphrase and record its fingerprint, to
   prove one day that a shared photo is real, without ever sharing the original. Open a `.pakkon` file in Pakkon to
   check it.

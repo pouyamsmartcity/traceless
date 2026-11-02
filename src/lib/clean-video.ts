@@ -7,8 +7,11 @@ import {
   Input,
   Mp4OutputFormat,
   Output,
+  QUALITY_LOW,
   canEncodeAudio,
+  canEncodeVideo,
   type ConversionAudioOptions,
+  type ConversionVideoOptions,
 } from 'mediabunny';
 import { PitchShifter, VOICE_DRIFT, randomVoiceRatio } from './voice';
 import { sourceFromBlob, sourceFromBytes } from './bytes';
@@ -23,6 +26,16 @@ export interface SoundOptions {
   mute?: boolean;
   /** Change voices (lower pitch and formants by a random factor). Ignored when `mute` is set. */
   voice?: boolean;
+}
+
+/** Longest side of a video made "light" (for slow or expensive internet). */
+export const LIGHT_VIDEO_SIDE = 1280;
+
+/** Output size for a light video: the longest side at most LIGHT_VIDEO_SIDE, even numbers (encoders need them). */
+export function lightSize(w: number, h: number): { width: number; height: number } {
+  const s = Math.min(1, LIGHT_VIDEO_SIDE / Math.max(w, h));
+  const even = (v: number) => Math.max(2, Math.round((v * s) / 2) * 2);
+  return { width: even(w), height: even(h) };
 }
 
 function cryptoRand(): number {
@@ -75,6 +88,8 @@ export interface CleanVideoResult {
   droppedTracks: number;
   /** Whether the new video has sound. */
   audioKept: boolean;
+  /** Whether the picture was made smaller (light option). */
+  light?: boolean;
 }
 
 /**
@@ -86,7 +101,7 @@ export interface CleanVideoResult {
 export async function cleanVideo(
   file: Blob,
   onProgress?: (fraction: number) => void,
-  opts: SoundOptions = {},
+  opts: SoundOptions & { light?: boolean } = {},
 ): Promise<CleanVideoResult> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
@@ -103,6 +118,18 @@ export async function cleanVideo(
       throw new VideoCleanError('unsupported', e instanceof Error ? e.message : String(e));
     }
     const before = await inspectVideo(sourceFromBlob(file));
+    // Light: a smaller picture at a lower bitrate (the video is re-encoded; otherwise it is copied as it is).
+    let video: ConversionVideoOptions | undefined;
+    if (opts.light) {
+      const track = await input.getPrimaryVideoTrack().catch(() => null);
+      if (track) {
+        const size = lightSize(await track.getDisplayWidth(), await track.getDisplayHeight());
+        // A device that cannot encode H.264 keeps the full size (the card says so).
+        if (typeof VideoEncoder !== 'undefined' && (await canEncodeVideo('avc', size).catch(() => false))) {
+          video = { codec: 'avc', ...size, fit: 'contain', bitrate: QUALITY_LOW, forceTranscode: true, allowTransformationMetadata: false };
+        }
+      }
+    }
     const target = new BufferTarget();
     const output = new Output({
       format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
@@ -116,6 +143,7 @@ export async function cleanVideo(
       showWarnings: false,
       // Voices and background sounds can identify people and places: sound can be left out or changed.
       ...(await soundConversion(opts)),
+      ...(video ? { video } : {}),
     });
     const keptVideo = conversion.utilizedTracks.some((t) => t.isVideoTrack());
     if (!conversion.isValid || !keptVideo) {
@@ -134,6 +162,7 @@ export async function cleanVideo(
       bytes,
       droppedTracks: Math.max(0, before.tracks.length - conversion.utilizedTracks.length),
       audioKept: conversion.utilizedTracks.some((t) => t.isAudioTrack()),
+      light: !!video,
     };
   } finally {
     input.dispose();

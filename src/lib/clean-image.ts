@@ -46,8 +46,11 @@ export async function decodeImage(file: Blob): Promise<DecodedImage> {
   return { element: img, width: img.naturalWidth, height: img.naturalHeight, url };
 }
 
-export function outputSize(w: number, h: number): { width: number; height: number; scale: number } {
-  const scale = w * h > MAX_PIXELS ? Math.sqrt(MAX_PIXELS / (w * h)) : 1;
+/** Longest side of a photo made "light" (for slow or expensive internet). */
+export const LIGHT_MAX_SIDE = 1600;
+
+export function outputSize(w: number, h: number, maxSide = Infinity): { width: number; height: number; scale: number } {
+  const scale = Math.min(w * h > MAX_PIXELS ? Math.sqrt(MAX_PIXELS / (w * h)) : 1, maxSide / Math.max(w, h), 1);
   return { width: Math.max(1, Math.floor(w * scale)), height: Math.max(1, Math.floor(h * scale)), scale };
 }
 
@@ -61,9 +64,9 @@ export function chooseOutputType(original: Uint8Array): OutputType {
 
 export const MASK_COLOR = '#000000';
 
-function canvasToBlob(canvas: HTMLCanvasElement, type: OutputType): Promise<Blob> {
+function canvasToBlob(canvas: HTMLCanvasElement, type: OutputType, quality = 0.92): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new ImageCleanError('encode', 'the browser could not create the picture'))), type, 0.92);
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new ImageCleanError('encode', 'the browser could not create the picture'))), type, quality);
   });
 }
 
@@ -126,6 +129,8 @@ export interface RenderOptions {
   extra?: boolean;
   /** How covers look (all styles are solid; see masks.ts). */
   style?: MaskStyle;
+  /** A smaller file for slow or expensive internet (at most LIGHT_MAX_SIDE pixels, lighter JPEG). */
+  light?: boolean;
 }
 
 /**
@@ -134,7 +139,7 @@ export interface RenderOptions {
  * `masks` are in the decoded image's pixels.
  */
 export async function renderClean(img: DecodedImage, masks: Cover[], type: OutputType, opts: RenderOptions = {}): Promise<Uint8Array> {
-  const { width, height, scale } = outputSize(img.width, img.height);
+  const { width, height, scale } = outputSize(img.width, img.height, opts.light ? LIGHT_MAX_SIDE : Infinity);
   let canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -176,7 +181,7 @@ export async function renderClean(img: DecodedImage, masks: Cover[], type: Outpu
     ctx = octx;
   }
 
-  const encoded = new Uint8Array(await (await canvasToBlob(canvas, type)).arrayBuffer());
+  const encoded = new Uint8Array(await (await canvasToBlob(canvas, type, opts.light ? 0.8 : 0.92)).arrayBuffer());
   canvas.width = 0; // free memory early on phones
   canvas.height = 0;
   const bytes = type === 'image/jpeg' ? stripJpeg(encoded) : stripPng(encoded);

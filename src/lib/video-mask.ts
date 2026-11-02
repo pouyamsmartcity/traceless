@@ -8,13 +8,14 @@ import {
   Mp4OutputFormat,
   Output,
   QUALITY_HIGH,
+  QUALITY_LOW,
   QUALITY_MEDIUM,
   canEncodeVideo,
   type VideoSample,
 } from 'mediabunny';
 import { sourceFromBlob } from './bytes';
 import { assertSaneMovie, inspectVideo } from './bmff';
-import { finishVideo, soundConversion, type CleanVideoResult } from './clean-video';
+import { finishVideo, lightSize, soundConversion, type CleanVideoResult } from './clean-video';
 import type { Detector } from './detect/detector';
 import { paintCovers, sampleColors, shrinkOutline, type MaskStyle } from './masks';
 import { masksAt, sampleTimes, type TimedBoxes } from './video-timeline';
@@ -46,6 +47,8 @@ export interface MaskedVideoOptions {
   mute?: boolean;
   /** Change voices. */
   voice?: boolean;
+  /** Smaller picture and bitrate (for slow or expensive internet). */
+  light?: boolean;
   onProgress?: (phase: 'detect' | 'encode', fraction: number) => void;
   signal?: AbortSignal;
 }
@@ -152,7 +155,9 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
 
     // Pass 2: re-encode with masks painted on every frame.
     checkAbort(opts.signal);
-    const canvas = new OffscreenCanvas(W, H);
+    // Light: the new video is drawn smaller (covers are scaled with it).
+    const outSize = opts.light ? lightSize(W, H) : { width: W, height: H };
+    const canvas = new OffscreenCanvas(outSize.width, outSize.height);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new VideoCleanError('cannotMask', 'no drawing surface');
     const target = new BufferTarget();
@@ -168,15 +173,15 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       video: {
         codec: 'avc',
         // The new video is built in memory: long videos use a lower bitrate so phones do not run out.
-        quality: end - start > LONG_VIDEO_SECONDS ? QUALITY_MEDIUM : QUALITY_HIGH,
+        quality: opts.light ? QUALITY_LOW : end - start > LONG_VIDEO_SECONDS ? QUALITY_MEDIUM : QUALITY_HIGH,
         forceTranscode: true,
         // Bake the rotation into the pixels, so masks (found on upright frames) land in the right place.
         allowTransformationMetadata: false,
-        processedWidth: W,
-        processedHeight: H,
+        processedWidth: outSize.width,
+        processedHeight: outSize.height,
         process: (sample: VideoSample) => {
-          const sw = sample.displayWidth;
-          const sh = sample.displayHeight;
+          const sw = opts.light ? outSize.width : sample.displayWidth;
+          const sh = opts.light ? outSize.height : sample.displayHeight;
           if (canvas.width !== sw || canvas.height !== sh) {
             canvas.width = sw;
             canvas.height = sh;
@@ -211,6 +216,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       bytes,
       droppedTracks: Math.max(0, before.tracks.length - conversion.utilizedTracks.length),
       audioKept: conversion.utilizedTracks.some((t) => t.isAudioTrack()),
+      light: !!opts.light,
       framesWithMasks,
       maxObjects,
     };

@@ -7,6 +7,7 @@ import type { Detection, Rect } from '../lib/detect/geometry';
 import type { Cover, MaskStyle } from '../lib/masks';
 import type { Finding } from '../lib/findings';
 import { inspectImage, sniffImage, type Hint } from '../lib/inspect-image';
+import { isAudioFile } from '../lib/media-kind';
 import { tick, type PhaseClock } from '../lib/eta';
 
 export type ItemStatus = 'queued' | 'reading' | 'detecting' | 'cleaning' | 'ready' | 'error';
@@ -15,7 +16,7 @@ export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'vi
 export interface Item {
   id: number;
   file: File;
-  media: 'image' | 'video';
+  media: 'image' | 'video' | 'audio';
   status: ItemStatus;
   progress?: number;
   /** Times the current long step, for the "time left" note. */
@@ -38,6 +39,12 @@ export interface Item {
   /** Number of text regions seen by a quick look when text covering is off (for the location warning). */
   textSeen?: number;
   droppedTracks: number;
+  /** Recording: the voice was changed in this copy. */
+  audioVoiced?: boolean;
+  /** Recording: made with the light option. */
+  audioLight?: boolean;
+  /** Video: made smaller (light option) — false when this device could not re-encode it. */
+  lightApplied?: boolean;
   /** Video: what happened to faces and plates. */
   videoMasks?: 'covered' | 'off' | 'unavailable';
   /** Video: largest number of faces/plates seen in one sampled frame. */
@@ -82,6 +89,8 @@ export interface Options {
   mute: boolean;
   /** Change voices in videos. */
   voice: boolean;
+  /** Smaller files for slow or expensive internet. */
+  light: boolean;
 }
 
 /** The options a video was made with (shown on its card; a rebuild is offered when they change). */
@@ -93,6 +102,7 @@ export interface VideoOptions {
   faces: boolean;
   plates: boolean;
   mute: boolean;
+  light: boolean;
 }
 
 let nextId = 1;
@@ -112,7 +122,7 @@ export function newItem(file: File): Item {
   return {
     id: nextId++,
     file,
-    media: isVideoFile(file) ? 'video' : 'image',
+    media: isVideoFile(file) ? 'video' : isAudioFile(file) ? 'audio' : 'image',
     status: 'queued',
     findings: [],
     hints: [],
@@ -242,7 +252,7 @@ function setOutput(item: Item, blob: Blob, ext: string): void {
 export async function renderImage(item: Item, opts: Options): Promise<void> {
   if (!item.decoded || !item.outputType) throw new Error('image not decoded');
   const snapshot: Options = { ...opts };
-  const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra, style: opts.maskStyle });
+  const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra, style: opts.maskStyle, light: opts.light });
   const type = item.outputType;
   const ext = type === 'image/png' ? 'png' : 'jpg';
   // Keep the same random name on re-render so a user does not get confused by changing names.
@@ -257,7 +267,14 @@ export function effectiveVideoOptions(item: Item, o: Options): VideoOptions {
   const covered = !item.skipVideoMasks;
   const mute = item.soundOverride === 'mute' || o.mute;
   const voice = !mute && item.soundOverride !== 'keep' && o.voice;
-  return { faces: o.faces && covered, plates: o.plates && covered, text: o.text && covered, people: o.people && covered, mute, voice, maskStyle: o.maskStyle };
+  return { faces: o.faces && covered, plates: o.plates && covered, text: o.text && covered, people: o.people && covered, mute, voice, maskStyle: o.maskStyle, light: o.light };
+}
+
+/** Whether a finished copy still matches the switches (photos are remade by themselves when they change). */
+export function upToDate(item: Item, o: Options): boolean {
+  if (item.media === 'image') return true;
+  if (item.media === 'audio') return item.audioVoiced === (item.soundOverride !== 'keep' && o.voice) && item.audioLight === o.light;
+  return sameVideoOptions(item, o);
 }
 
 export function sameVideoOptions(item: Item, b: Options): boolean {
@@ -271,6 +288,7 @@ export function sameVideoOptions(item: Item, b: Options): boolean {
     a.people === e.people &&
     a.mute === e.mute &&
     a.voice === e.voice &&
+    a.light === e.light &&
     (a.maskStyle === e.maskStyle || !(a.faces || a.plates || a.text || a.people))
   );
 }
@@ -279,7 +297,7 @@ export function sameVideoOptions(item: Item, b: Options): boolean {
 const SOUND_SWITCHES = ['mute', 'voice'] as const;
 type PhotoSwitch = Exclude<keyof Options, (typeof SOUND_SWITCHES)[number]>;
 // Listing every photo switch is enforced by the type: adding a switch to Options without listing it fails to compile.
-const PHOTO_SWITCHES = ['faces', 'plates', 'text', 'people', 'extra', 'maskStyle'] as const satisfies readonly PhotoSwitch[];
+const PHOTO_SWITCHES = ['faces', 'plates', 'text', 'people', 'extra', 'maskStyle', 'light'] as const satisfies readonly PhotoSwitch[];
 type Missing = Exclude<PhotoSwitch, (typeof PHOTO_SWITCHES)[number]>;
 const allListed: Missing extends never ? true : never = true;
 void allListed;
@@ -311,7 +329,19 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
   };
   try {
     set('reading');
-    if (item.media === 'video') {
+    if (item.media === 'audio') {
+      if (item.file.size > MAX_VIDEO_BYTES) throw new RangeError('recording larger than 2 GB');
+      // A voice change can be undone in part by someone who tries; the card says so.
+      const voice = item.soundOverride !== 'keep' && opts.voice;
+      const { cleanAudio } = await import('../lib/clean-audio');
+      set('cleaning', 0);
+      const r = await cleanAudio(item.file, { voice, light: opts.light, onProgress: (p) => set('cleaning', p) });
+      item.audioLight = opts.light;
+      item.findings = r.findings;
+      item.audioVoiced = voice;
+      setOutput(item, new Blob([r.bytes as BlobPart], { type: r.type }), 'm4a');
+      item.output!.name = item.output!.name.replace(/^img-/, 'rec-');
+    } else if (item.media === 'video') {
       if (item.file.size > MAX_VIDEO_BYTES) throw new RangeError('video larger than 2 GB');
       const inspection = await inspectVideo(sourceFromBlob(item.file));
       item.findings = inspection.findings;
@@ -334,12 +364,14 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
             style: opts.maskStyle,
             mute,
             voice,
+            light: opts.light,
             signal: item.abort.signal,
             onProgress: (phase, p) => set(phase === 'detect' ? 'detecting' : 'cleaning', p),
           });
           bytes = r.bytes;
           item.droppedTracks = r.droppedTracks;
           item.audioKept = r.audioKept;
+          item.lightApplied = r.light ?? false;
           item.videoMasks = 'covered';
           item.videoObjects = r.maxObjects;
         } catch (e) {
@@ -353,7 +385,8 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
       }
       if (!bytes) {
         set('cleaning', 0);
-        const result = await cleanVideo(item.file, (p) => set('cleaning', p), { mute, voice });
+        const result = await cleanVideo(item.file, (p) => set('cleaning', p), { mute, voice, light: opts.light });
+        item.lightApplied = result.light ?? false;
         bytes = result.bytes;
         item.droppedTracks = result.droppedTracks;
         item.audioKept = result.audioKept;

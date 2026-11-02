@@ -20,6 +20,7 @@ the absence of false alarms. Regenerate one group with e.g. `python3 scripts/mak
 |---|---|---|
 | `astronaut.png` | Portrait of astronaut Eileen Collins, NASA, as shipped with [scikit-image](https://scikit-image.org/) (`skimage.data.astronaut`) | Public domain (NASA) |
 | `astronaut-pan.mp4`, `astronaut-pan-rotated.mp4`, `astronaut-fast.m2ts` | Made with ffmpeg from `astronaut.png` (a slow pan, the same stored sideways with a rotation tag, and a fast pan in an MPEG-TS file whose timestamps start at about 1.5 s, like camcorder files). The x264 encoder leaves its name and settings inside the video stream, which the tests use as a stand-in for camera data. | Public domain |
+| `astronaut-1080.mp4` | A 1.5-second 1920 x 1080 still video made with ffmpeg from `astronaut.png` (centred, 600 x 600) with a 330 Hz tone | Public domain |
 | `astronaut-grid.jpg` | `astronaut.png` repeated 4 x 3 (a "crowd" of 12 faces) | Public domain |
 | `phone-screenshot.png` | A synthetic phone screenshot (drawn with Pillow) with a dark status bar | Made for this project, public domain |
 | `iran-truck.mp4` | A 2-second still video made with ffmpeg from `iran-truck.png` | MIT, as `iran-truck.png` |

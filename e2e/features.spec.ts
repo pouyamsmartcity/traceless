@@ -1,0 +1,283 @@
+import { expect, test, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { sourceFromBytes } from '../src/lib/bytes';
+import { inspectVideo } from '../src/lib/bmff';
+import { VOICE_DRIFT, VOICE_MIN, VOICE_SPAN } from '../src/lib/voice';
+
+const fixture = (p: string) => fileURLToPath(new URL(`../test/fixtures/${p}`, import.meta.url));
+
+async function readyItem(page: Page, n = 0) {
+  const item = page.getByTestId('item').nth(n);
+  await expect(item.getByTestId('item-status')).toHaveAttribute('class', /ready/, { timeout: 90_000 });
+  return item;
+}
+
+async function bytesOf(page: Page, href: string | null): Promise<Uint8Array> {
+  return new Uint8Array(await page.evaluate(async (url) => Array.from(new Uint8Array(await (await fetch(url!)).arrayBuffer())), href));
+}
+
+/** Pitch of a pure tone in a sound file, by counting zero crossings (measured in the browser). */
+async function toneHz(page: Page, href: string | null): Promise<number> {
+  return page.evaluate(async (url) => {
+    const buf = await (await fetch(url!)).arrayBuffer();
+    const audio = await new OfflineAudioContext(1, 48000, 48000).decodeAudioData(buf);
+    const x = audio.getChannelData(0);
+    const start = Math.floor(audio.sampleRate * 0.3);
+    const end = Math.floor(audio.sampleRate * 1.6);
+    let n = 0;
+    for (let i = start + 1; i < end; i++) if (x[i - 1]! < 0 && x[i]! >= 0) n++;
+    return n / ((end - start) / audio.sampleRate);
+  }, href);
+}
+
+test.describe('Pakkon: new features', () => {
+  test.beforeEach(async ({ page }) => {
+    // The welcome card is tested on its own; other tests start as a returning visitor.
+    await page.addInitScript(() => {
+      if (!sessionStorage.getItem('fresh')) localStorage.setItem('pakkon-intro', 'done');
+    });
+  });
+
+  for (const name of ['voice-note.ogg', 'voice-note.mp3', 'voice-memo.m4a']) {
+    test(`cleans a voice note (${name}): place, speaker and date are gone, the sound stays`, async ({ page }) => {
+      await page.goto('/');
+      await page.getByTestId('file-input').setInputFiles(fixture(`leaky/${name}`));
+      const item = await readyItem(page);
+      // What the original told: the place-named title and the speaker.
+      await expect(item.getByTestId('findings')).toContainText('Enghelab');
+      await expect(item.getByTestId('findings')).toContainText('Reza');
+      await expect(item.getByTestId('report')).toBeVisible();
+      await expect(item.getByTestId('waveform')).toHaveAttribute('data-drawn', 'true');
+      const save = item.getByTestId('save');
+      await expect(save).toHaveAttribute('download', /^rec-[a-z0-9]+\.m4a$/);
+      const bytes = await bytesOf(page, await save.getAttribute('href'));
+      const text = new TextDecoder('latin1').decode(bytes);
+      for (const leak of ['Enghelab', 'Reza', 'bazaar', 'FakeRecorder', '35.69', 'Lavf', '2026']) expect(text).not.toContain(leak);
+      expect((await inspectVideo(sourceFromBytes(bytes))).tracks).toEqual(['soun']);
+      // Same tone as before (voice not changed unless asked).
+      expect(Math.abs((await toneHz(page, await save.getAttribute('href'))) - 220)).toBeLessThan(220 * 0.03);
+    });
+  }
+
+  test('changes the voice in a voice note when asked', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-voice').check();
+    await page.getByTestId('file-input').setInputFiles(fixture('leaky/voice-note.ogg'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('report')).toContainText('صدا تغییر کرد');
+    const hz = await toneHz(page, await item.getByTestId('save').getAttribute('href'));
+    expect(hz).toBeGreaterThan(220 * (VOICE_MIN - VOICE_DRIFT) * 0.97);
+    expect(hz).toBeLessThan(220 * (VOICE_MIN + VOICE_SPAN + VOICE_DRIFT) * 1.03);
+    // Switching the voice change off offers to make it again.
+    await page.getByTestId('opt-voice').uncheck();
+    await expect(item.getByTestId('rebuild')).toBeVisible();
+  });
+
+  test('a summary shows what was removed and covered', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles(fixture('leaky/photo-everything.jpg'));
+    const report = (await readyItem(page)).getByTestId('report');
+    for (const kind of ['location', 'device', 'time']) await expect(report.locator(`[data-kind="${kind}"]`)).toBeVisible();
+    await expect((await readyItem(page)).getByTestId('size-line')).toContainText('کیلوبایت');
+  });
+
+  test('drag across the picture to see the original; letting go shows the safe copy again', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
+    const item = await readyItem(page);
+    const img = item.getByTestId('output-image');
+    const safeSrc = await img.getAttribute('src');
+    const wrap = item.locator('.preview-wrap.compare');
+    const box = (await wrap.boundingBox())!;
+    await item.getByTestId('compare').hover();
+    await page.mouse.down();
+    await expect(wrap).toHaveAttribute('data-revealing', 'true');
+    await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2, { steps: 5 });
+    const reveal = await wrap.evaluate((el) => parseFloat(el.style.getPropertyValue('--reveal')));
+    expect(reveal).toBeGreaterThan(70);
+    // Background checks may refresh the card meanwhile; letting go anywhere brings the safe copy back.
+    await page.waitForTimeout(1500);
+    await page.mouse.move(5, 5);
+    await page.mouse.up();
+    await expect(wrap).not.toHaveAttribute('data-revealing', 'true');
+    await expect(wrap).toHaveAttribute('style', /--reveal: 0%/);
+    // The picture and the save link are always the safe copy.
+    await expect(img).toHaveAttribute('src', safeSrc!);
+    await expect(item.getByTestId('save')).toHaveAttribute('href', safeSrc!);
+  });
+
+  test('sticker look: faces become a smiling yellow sticker, still solid', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('label.style-sticker').click();
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
+    const item = await readyItem(page);
+    const href = await item.getByTestId('save').getAttribute('href');
+    const stats = await page.evaluate(async (url) => {
+      const img = new Image();
+      img.src = url!;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+      // A cheek-free patch of the forehead (yellow), and the whole face (a few dark features).
+      const fore = ctx.getImageData(212, 72, 26, 10).data;
+      let yellow = 0;
+      for (let i = 0; i < fore.length; i += 4) if (fore[i]! > 220 && fore[i + 1]! > 180 && fore[i + 2]! < 140) yellow++;
+      return { yellowShare: yellow / (fore.length / 4) };
+    }, href);
+    expect(stats.yellowShare).toBeGreaterThan(0.95);
+  });
+
+  test('smaller files: a big photo is made at most 1600 pixels wide', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-light').check();
+    const big = await page.evaluate(async () => {
+      const c = document.createElement('canvas');
+      c.width = 3200;
+      c.height = 2000;
+      const ctx = c.getContext('2d')!;
+      const g = ctx.createLinearGradient(0, 0, 3200, 2000);
+      g.addColorStop(0, '#345');
+      g.addColorStop(1, '#fc8');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 3200, 2000);
+      const b = await new Promise<Blob>((r) => c.toBlob((x) => r(x!), 'image/jpeg', 0.95));
+      return Array.from(new Uint8Array(await b.arrayBuffer()));
+    });
+    await page.getByTestId('file-input').setInputFiles({ name: 'big.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(big) });
+    const item = await readyItem(page);
+    const size = await item.getByTestId('output-image').evaluate(async (img: HTMLImageElement) => {
+      await img.decode();
+      return [img.naturalWidth, img.naturalHeight];
+    });
+    expect(size).toEqual([1600, 1000]);
+  });
+
+  test('smaller files: a big video is made at most 1280 pixels wide, still with covers', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('opt-light').check();
+    // A 1920 x 1080 video with a face in the middle.
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut-1080.mp4'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('light-unavailable')).toHaveCount(0);
+    const bytes = await bytesOf(page, await item.getByTestId('save').getAttribute('href'));
+    expect((await inspectVideo(sourceFromBytes(bytes))).tracks.sort()).toEqual(['soun', 'vide']);
+    const dims = await item.locator('video.preview').evaluate(async (v: HTMLVideoElement) => {
+      if (v.readyState < 1) await new Promise((r) => (v.onloadedmetadata = r));
+      return [v.videoWidth, v.videoHeight];
+    });
+    expect(dims).toEqual([1280, 720]);
+    // The face (centre of the frame) is still covered in the smaller video.
+    const spread = await item.locator('video.preview').evaluate(async (v: HTMLVideoElement) => {
+      v.currentTime = 0.7;
+      await new Promise((r) => (v.onseeked = r));
+      const c = document.createElement('canvas');
+      c.width = v.videoWidth;
+      c.height = v.videoHeight;
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(v, 0, 0);
+      // astronaut.png face at about (205..245, 95..145) of 512 -> scaled 600/512, centred, then 1280/1920.
+      const s = (600 / 512) * (1280 / 1920);
+      const x = (1920 - 600) / 2 * (1280 / 1920) + 210 * s;
+      const y = (1080 - 600) / 2 * (1280 / 1920) + 100 * s;
+      const d = ctx.getImageData(Math.round(x), Math.round(y), Math.round(30 * s), Math.round(35 * s)).data;
+      let lo = 255;
+      let hi = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const l = 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!;
+        lo = Math.min(lo, l);
+        hi = Math.max(hi, l);
+      }
+      return hi - lo;
+    });
+    expect(spread).toBeLessThan(25);
+  });
+
+  test('wipe: one tap forgets every file and copy', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
+    const href = await (await readyItem(page)).getByTestId('save').getAttribute('href');
+    await page.getByTestId('wipe').click();
+    await expect(page.getByTestId('item')).toHaveCount(0);
+    await expect(page.getByTestId('toast')).toContainText('پاک شد');
+    // The safe copy's memory is released: its address no longer works.
+    const stillThere = await page.evaluate(async (url) => fetch(url!).then(() => true, () => false), href);
+    expect(stillThere).toBe(false);
+  });
+
+  test('auto-forget: everything is wiped after five minutes in the background', async ({ page }) => {
+    await page.clock.install();
+    await page.goto('/');
+    await page.getByTestId('opt-autoWipe').check();
+    await page.getByTestId('file-input').setInputFiles(fixture('leaky/voice-note.ogg'));
+    await readyItem(page);
+    const setVisibility = (state: 'hidden' | 'visible') =>
+      page.evaluate((s) => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => s });
+        document.dispatchEvent(new Event('visibilitychange'));
+      }, state);
+    await setVisibility('hidden');
+    await page.clock.runFor(4 * 60 * 1000);
+    await expect(page.getByTestId('item')).toHaveCount(1);
+    await page.clock.runFor(60 * 1000 + 100);
+    await setVisibility('visible');
+    await expect(page.getByTestId('item')).toHaveCount(0);
+  });
+
+  test('saves every safe copy in one ZIP file, without real dates', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles([fixture('real/astronaut.png'), fixture('leaky/photo-everything.jpg')]);
+    await readyItem(page, 0);
+    await readyItem(page, 1);
+    const names = await page.getByTestId('save').evaluateAll((as) => as.map((a) => a.getAttribute('download')).sort());
+    const download = page.waitForEvent('download');
+    await page.getByTestId('save-zip').click();
+    const path = await (await download).path();
+    const out = execFileSync('python3', [
+      '-I',
+      '-c',
+      'import zipfile,sys,json;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print(json.dumps(sorted([[i.filename,list(i.date_time)] for i in z.infolist()])))',
+      path,
+    ]).toString();
+    expect(JSON.parse(out)).toEqual(names.map((n) => [n, [1980, 1, 1, 0, 0, 0]]));
+  });
+
+  test('videos get a filmstrip; tapping a frame jumps there', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut-pan.mp4'));
+    const item = await readyItem(page);
+    const frames = item.getByTestId('filmstrip').locator('.frame');
+    await expect(frames).toHaveCount(8, { timeout: 30_000 });
+    const t = Number(await frames.nth(5).getAttribute('data-time'));
+    await frames.nth(5).click();
+    const now = await item.locator('video.preview').evaluate((v: HTMLVideoElement) => v.currentTime);
+    expect(Math.abs(now - t)).toBeLessThan(0.05);
+  });
+
+  test('first visit: a short welcome that stays closed once dismissed', async ({ page }) => {
+    await page.addInitScript(() => sessionStorage.setItem('fresh', '1'));
+    await page.goto('/');
+    await page.evaluate(() => localStorage.removeItem('pakkon-intro'));
+    await page.reload();
+    await expect(page.getByTestId('intro')).toBeVisible();
+    await page.getByTestId('intro-done').click();
+    await expect(page.getByTestId('intro')).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByTestId('intro')).toHaveCount(0);
+  });
+
+  test('light and dark looks can be chosen and are remembered', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('theme').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await page.getByTestId('theme').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    const bg = await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--surface').trim());
+    expect(bg).toBe('#141e1b');
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  });
+});

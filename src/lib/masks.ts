@@ -7,11 +7,13 @@ import type { Rect } from './detect/geometry';
  * - plates, text and hand-drawn covers: rounded rectangles,
  * - whole people: their silhouette, found by a segmentation network (a rounded box when that fails).
  * Styles: "smart" takes its colour from just around the cover so it sits naturally in the picture,
- * "black" is the classic look, "brand" is Pakkon's green with its eraser mark.
+ * "black" is the classic look, "brand" is Pakkon's green with its eraser mark, "sticker" is a friendly solid pastel
+ * (faces get a drawn smiley on top of the solid fill).
  */
 
 export type MaskShape = 'ellipse' | 'rounded' | 'rect' | 'silhouette';
-export type MaskStyle = 'smart' | 'black' | 'brand';
+export type MaskStyle = 'smart' | 'black' | 'brand' | 'sticker';
+export const MASK_STYLES: readonly MaskStyle[] = ['smart', 'black', 'brand', 'sticker'];
 
 /** A silhouette at low resolution, covering the cover's box (1 = cover, 0 = keep). */
 export interface Silhouette {
@@ -28,6 +30,9 @@ export interface Cover extends Rect {
 }
 
 const BRAND = '#126354';
+/** Sticker style: faces are sunny yellow, everything else a soft pastel (all fully opaque). */
+const STICKER_FACE = '#ffd34e';
+const STICKER_OTHER = ['#9bd8c5', '#a9c8ff', '#f7b2c4', '#cdb8f0'];
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -153,6 +158,35 @@ function silhouetteCanvas(c: Cover, s: number): OffscreenCanvas | HTMLCanvasElem
   return big;
 }
 
+function smiley(ctx: Ctx, c: Cover, s: number): void {
+  const e = ellipseOf({ x: c.x * s, y: c.y * s, w: c.w * s, h: c.h * s });
+  const r = Math.min(e.rx, e.ry);
+  if (r < 8) return;
+  ctx.save();
+  ctx.fillStyle = '#3b2a12';
+  ctx.strokeStyle = '#3b2a12';
+  ctx.lineCap = 'round';
+  // Eyes.
+  for (const dx of [-0.33, 0.33]) {
+    ctx.beginPath();
+    ctx.ellipse(e.cx + dx * r, e.cy - 0.18 * r, 0.09 * r, 0.13 * r, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Smile.
+  ctx.lineWidth = Math.max(1.5, 0.08 * r);
+  ctx.beginPath();
+  ctx.arc(e.cx, e.cy + 0.02 * r, 0.42 * r, Math.PI * 0.18, Math.PI * 0.82);
+  ctx.stroke();
+  // Cheeks.
+  ctx.fillStyle = 'rgba(255, 120, 90, 0.45)';
+  for (const dx of [-0.52, 0.52]) {
+    ctx.beginPath();
+    ctx.ellipse(e.cx + dx * r, e.cy + 0.16 * r, 0.12 * r, 0.07 * r, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function eraserMark(ctx: Ctx, c: Cover, s: number): void {
   const size = Math.min(c.w, c.h) * s * 0.42;
   if (size < 14) return;
@@ -194,7 +228,15 @@ export function paintCovers(ctx: Ctx, covers: Cover[], style: MaskStyle, scale: 
     for (let j = 0; j < covers.length; j++) if (group[j] === g && covers[j]!.w * covers[j]!.h > covers[best]!.w * covers[best]!.h) best = j;
     return own[best];
   };
-  const fills = covers.map((_, i) => (style === 'black' ? '#000000' : style === 'brand' ? BRAND : `rgb(${colourOf(i)!.join(',')})`));
+  const stickerOf = (i: number) => {
+    // One colour per group; a group with a face is a face sticker.
+    const g = group[i]!;
+    if (covers.some((c, j) => group[j] === g && c.shape === 'ellipse')) return STICKER_FACE;
+    return STICKER_OTHER[g % STICKER_OTHER.length]!;
+  };
+  const fills = covers.map((_, i) =>
+    style === 'black' ? '#000000' : style === 'brand' ? BRAND : style === 'sticker' ? stickerOf(i) : `rgb(${colourOf(i)!.join(',')})`,
+  );
   const shaped = covers.map((c) => (c.shape === 'silhouette' && !c.silhouette ? { ...c, shape: 'rounded' as const } : c));
 
   // Smart style: edges first, then all fills on top, so only the outer edge of a group stays visible.
@@ -226,6 +268,12 @@ export function paintCovers(ctx: Ctx, covers: Cover[], style: MaskStyle, scale: 
     }
     ctx.restore();
   });
+  if (style === 'sticker') {
+    // A smiley on every face oval, drawn over its solid fill (nothing of the picture shows through).
+    shaped.forEach((c) => {
+      if (c.shape === 'ellipse') smiley(ctx, c, scale);
+    });
+  }
   if (style === 'brand') {
     // One mark per group, on its largest cover.
     const marked = new Set<number>();

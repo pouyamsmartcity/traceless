@@ -451,26 +451,6 @@ test.describe('Pakkon', () => {
     expect((await regionColor(page, { x: 22, y: 60, w: 30, h: 60 })).spread).toBeGreaterThan(20);
   });
 
-  test('holding "compare" shows the original, releasing shows the safe copy again', async ({ page }) => {
-    await page.goto('/');
-    await addFile(page, fixture('real/astronaut.png'));
-    const item = await readyItem(page);
-    const img = item.getByTestId('output-image');
-    const safeSrc = await img.getAttribute('src');
-    const button = item.getByTestId('compare');
-    await button.hover();
-    await page.mouse.down();
-    await expect(img).not.toHaveAttribute('src', safeSrc!);
-    // Background checks may refresh the card meanwhile; the preview must stay the same element.
-    await page.waitForTimeout(2500);
-    // Let go somewhere else on the page: the safe copy comes back anyway.
-    await page.mouse.move(5, 5);
-    await page.mouse.up();
-    await expect(img).toHaveAttribute('src', safeSrc!);
-    // The save link always points at the safe copy.
-    await expect(item.getByTestId('save')).toHaveAttribute('href', safeSrc!);
-  });
-
   test('cover looks: smart colour, black, and Pakkon green, all solid', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('real/astronaut.png'));
@@ -479,13 +459,13 @@ test.describe('Pakkon', () => {
     let c = await regionColor(page, face);
     expect(c.spread).toBeLessThan(6);
     expect(c.max).toBeGreaterThan(30); // smart: a colour from the surroundings, not black
-    await page.getByTestId('style-black').check({ force: true });
+    await page.locator('label.style-black').click();
     await readyItem(page);
     await page.waitForTimeout(500);
     await readyItem(page);
     c = await regionColor(page, face);
     expect(c.max).toBeLessThan(8);
-    await page.getByTestId('style-brand').check({ force: true });
+    await page.locator('label.style-brand').click();
     await readyItem(page);
     await page.waitForTimeout(500);
     await readyItem(page);
