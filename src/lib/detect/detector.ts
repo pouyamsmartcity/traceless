@@ -1,5 +1,5 @@
 import { expand, letterbox, nms, tiles, unletterbox, type Detection, type Letterbox, type Rect } from './geometry';
-import { MODELS, toTensor, toTensorWH, type ModelId, type PixelFormat, type RawBox } from './models';
+import { MODELS, silhouetteFromMap, toTensor, toTensorWH, type ModelId, type PixelFormat, type RawBox } from './models';
 import type { WorkerRequest, WorkerResponse } from './worker';
 
 /** Longest side (pixels) of the picture the detectors look at. Larger photos are scaled down for detection only. */
@@ -97,7 +97,7 @@ export class Detector {
   private worker: Worker | undefined;
   private ready: Promise<void> | undefined;
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (b: RawBox[]) => void; reject: (e: Error) => void }>();
+  private readonly pending = new Map<number, { resolve: (b: InferResult) => void; reject: (e: Error) => void }>();
   private canvas: HTMLCanvasElement | undefined;
 
   constructor(private readonly base: string) {}
@@ -110,7 +110,7 @@ export class Detector {
       w.onmessage = (e: MessageEvent<WorkerResponse>) => {
         const m = e.data;
         if (m.type === 'ready') resolve();
-        else if (m.type === 'result') this.settle(m.id, m.boxes);
+        else if (m.type === 'result') this.settle(m.id, m.map ? { boxes: [], map: m.map } : { boxes: m.boxes });
         else this.settle(m.id, new Error(m.message));
       };
       w.onerror = (e) => {
@@ -131,7 +131,7 @@ export class Detector {
     this.ready = undefined;
   }
 
-  private settle(id: number | undefined, value: RawBox[] | Error): void {
+  private settle(id: number | undefined, value: InferResult | Error): void {
     if (id === undefined) return;
     const p = this.pending.get(id);
     if (!p) return;
@@ -140,10 +140,10 @@ export class Detector {
     else p.resolve(value);
   }
 
-  private async infer(model: ModelId, tensor: Float32Array, width: number, height: number): Promise<RawBox[]> {
+  private async inferRaw(model: ModelId, tensor: Float32Array, width: number, height: number): Promise<InferResult> {
     await this.start();
     const id = this.nextId++;
-    return new Promise<RawBox[]>((resolve, reject) => {
+    return new Promise<InferResult>((resolve, reject) => {
       // Never hang: if the model does not answer in time, give up (the photo is still cleaned,
       // and the user is told to cover things by hand) and start a fresh worker next time.
       const timer = setTimeout(() => {
@@ -164,6 +164,40 @@ export class Detector {
       });
       this.worker!.postMessage({ type: 'run', id, model, tensor, width, height } satisfies WorkerRequest, [tensor.buffer]);
     });
+  }
+
+  private async infer(model: ModelId, tensor: Float32Array, width: number, height: number): Promise<RawBox[]> {
+    return (await this.inferRaw(model, tensor, width, height)).boxes;
+  }
+
+  /**
+   * Draws the silhouettes of detected people (photos): each person's box is outlined by the segmentation
+   * network. A person whose outline cannot be trusted keeps a plain rounded cover over the whole box.
+   */
+  async outlinePeople(source: CanvasImageSource, detections: Detection[]): Promise<void> {
+    const spec = MODELS.seg;
+    const size = spec.size;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    try {
+      for (const d of detections) {
+        if (d.kind !== 'person' || d.w < 8 || d.h < 8) continue;
+        ctx.clearRect(0, 0, size, size);
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(source, d.x, d.y, d.w, d.h, 0, 0, size, size);
+        const tensor = toTensorWH(ctx.getImageData(0, 0, size, size).data, size, size, spec.pixels);
+        const r = await this.inferRaw('seg', tensor, size, size);
+        if (!r.map) continue;
+        const data = silhouetteFromMap(r.map, size, SILHOUETTE_CELLS, spec.threshold);
+        if (data) d.silhouette = { w: SILHOUETTE_CELLS, h: SILHOUETTE_CELLS, data };
+      }
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
 
   /** Loads the runtime and models ahead of time, so the first photo is fast. Errors are ignored here. */
@@ -302,6 +336,11 @@ export class Detector {
     return nms(found, 0.5);
   }
 }
+
+type InferResult = { boxes: RawBox[]; map?: Float32Array };
+
+/** Silhouettes are kept at this many cells per side of a person's box (fine enough for a clean outline). */
+const SILHOUETTE_CELLS = 160;
 
 /** Longest side of the text model's input. */
 const TEXT_MAX_SIDE = 1920;

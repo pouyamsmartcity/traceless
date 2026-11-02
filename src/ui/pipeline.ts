@@ -4,6 +4,7 @@ import { ImageCleanError, chooseOutputType, decodeImage, renderClean, thumbnailD
 import { VideoCleanError } from '../lib/video-errors';
 import { DetectionError, type Detector } from '../lib/detect/detector';
 import type { Detection, Rect } from '../lib/detect/geometry';
+import type { Cover, MaskStyle } from '../lib/masks';
 import type { Finding } from '../lib/findings';
 import { inspectImage, sniffImage, type Hint } from '../lib/inspect-image';
 
@@ -72,6 +73,8 @@ export interface Options {
   text: boolean;
   /** Cover whole people (body, clothes, hair). */
   people: boolean;
+  /** How covers look: smart colour, black or Pakkon's mark. */
+  maskStyle: MaskStyle;
   /** Leave the sound out of videos. */
   mute: boolean;
   /** Change voices in videos. */
@@ -80,6 +83,7 @@ export interface Options {
 
 /** The options a video was made with (shown on its card; a rebuild is offered when they change). */
 export interface VideoOptions {
+  maskStyle: MaskStyle;
   people: boolean;
   voice: boolean;
   text: boolean;
@@ -131,11 +135,23 @@ export function kindEnabled(kind: Detection['kind'], opts: Options): boolean {
   return kind === 'face' ? opts.faces : kind === 'plate' ? opts.plates : kind === 'person' ? opts.people : opts.text;
 }
 
+/** Outlines people with the segmentation network; if that fails, they keep box-shaped covers. */
+async function outline(detector: Detector, item: Item, detections: Detection[]): Promise<void> {
+  if (!item.decoded) return;
+  try {
+    await detector.outlinePeople(item.decoded.element, detections);
+  } catch (e) {
+    console.warn('people outlines unavailable, covering their boxes', e);
+  }
+}
+
 /** Runs person detection once for a photo, when covering whole people is first switched on. */
 export async function ensurePeople(item: Item, detector: Detector): Promise<void> {
   if (item.peopleDetected || !item.decoded) return;
   try {
-    item.detections.push(...(await detector.detect(item.decoded.element, item.decoded.width, item.decoded.height, { faces: false, plates: false, people: true })));
+    const people = await detector.detect(item.decoded.element, item.decoded.width, item.decoded.height, { faces: false, plates: false, people: true });
+    await outline(detector, item, people);
+    item.detections.push(...people);
   } catch (e) {
     console.error('person detection failed', e);
     item.detectFailed = true;
@@ -187,11 +203,16 @@ export function locationRisks(item: Item, opts: Options): ('text' | 'plates' | '
 }
 
 /** The masks that will be painted: auto detections the user kept and enabled, plus hand-drawn ones. */
-export function activeMasks(item: Item, opts: Options): Rect[] {
-  const auto = item.detections.filter(
-    (d, i) => !item.removed.has(i) && kindEnabled(d.kind, opts),
-  );
-  return [...auto, ...item.manual];
+export function activeMasks(item: Item, opts: Options): Cover[] {
+  const auto = item.detections.filter((d, i) => !item.removed.has(i) && kindEnabled(d.kind, opts)).map(coverOf);
+  return [...auto, ...item.manual.map((r): Cover => ({ ...r, shape: 'rounded' }))];
+}
+
+/** The shape a detection is covered with. */
+export function coverOf(d: Detection): Cover {
+  const c: Cover = { x: d.x, y: d.y, w: d.w, h: d.h, shape: d.kind === 'face' ? 'ellipse' : d.kind === 'person' && d.silhouette ? 'silhouette' : 'rounded' };
+  if (d.silhouette) c.silhouette = d.silhouette;
+  return c;
 }
 
 function errorKind(e: unknown): ErrorKind {
@@ -218,7 +239,7 @@ function setOutput(item: Item, blob: Blob, ext: string): void {
 export async function renderImage(item: Item, opts: Options): Promise<void> {
   if (!item.decoded || !item.outputType) throw new Error('image not decoded');
   const snapshot: Options = { ...opts };
-  const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra });
+  const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra, style: opts.maskStyle });
   const type = item.outputType;
   const ext = type === 'image/png' ? 'png' : 'jpg';
   // Keep the same random name on re-render so a user does not get confused by changing names.
@@ -233,20 +254,29 @@ export function effectiveVideoOptions(item: Item, o: Options): VideoOptions {
   const covered = !item.skipVideoMasks;
   const mute = item.soundOverride === 'mute' || o.mute;
   const voice = !mute && item.soundOverride !== 'keep' && o.voice;
-  return { faces: o.faces && covered, plates: o.plates && covered, text: o.text && covered, people: o.people && covered, mute, voice };
+  return { faces: o.faces && covered, plates: o.plates && covered, text: o.text && covered, people: o.people && covered, mute, voice, maskStyle: o.maskStyle };
 }
 
 export function sameVideoOptions(item: Item, b: Options): boolean {
   const a = item.videoMadeWith;
   const e = effectiveVideoOptions(item, b);
-  return !!a && a.faces === e.faces && a.plates === e.plates && a.text === e.text && a.people === e.people && a.mute === e.mute && a.voice === e.voice;
+  return (
+    !!a &&
+    a.faces === e.faces &&
+    a.plates === e.plates &&
+    a.text === e.text &&
+    a.people === e.people &&
+    a.mute === e.mute &&
+    a.voice === e.voice &&
+    (a.maskStyle === e.maskStyle || !(a.faces || a.plates || a.text || a.people))
+  );
 }
 
 /** Switches that change a photo's copy. Sound switches only affect videos. */
 const SOUND_SWITCHES = ['mute', 'voice'] as const;
 type PhotoSwitch = Exclude<keyof Options, (typeof SOUND_SWITCHES)[number]>;
 // Listing every photo switch is enforced by the type: adding a switch to Options without listing it fails to compile.
-const PHOTO_SWITCHES = ['faces', 'plates', 'text', 'people', 'extra'] as const satisfies readonly PhotoSwitch[];
+const PHOTO_SWITCHES = ['faces', 'plates', 'text', 'people', 'extra', 'maskStyle'] as const satisfies readonly PhotoSwitch[];
 type Missing = Exclude<PhotoSwitch, (typeof PHOTO_SWITCHES)[number]>;
 const allListed: Missing extends never ? true : never = true;
 void allListed;
@@ -292,6 +322,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
             plates: opts.plates,
             text: opts.text,
             people: opts.people,
+            style: opts.maskStyle,
             mute,
             voice,
             signal: item.abort.signal,
@@ -345,6 +376,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
           onProgress: (p) => set('detecting', p),
         });
         item.peopleDetected = opts.people;
+        if (opts.people) await outline(detector, item, item.detections);
       } catch (e) {
         console.error('detection failed', e);
         item.detectFailed = true;

@@ -13,7 +13,7 @@ interface Settings extends Options {
 }
 
 function loadSettings(): Settings {
-  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false, voice: false, people: false };
+  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false, voice: false, people: false, maskStyle: 'smart' };
   try {
     const raw = localStorage.getItem('pakkon-settings');
     if (raw) {
@@ -27,6 +27,7 @@ function loadSettings(): Settings {
         mute: s.mute === true,
         voice: s.voice === true,
         people: s.people === true,
+        maskStyle: s.maskStyle === 'black' || s.maskStyle === 'brand' ? s.maskStyle : 'smart',
       };
     }
   } catch {
@@ -265,6 +266,8 @@ export class App {
         toggle('plates', t.optPlates),
         toggle('text', t.optText),
         toggle('people', t.optPeople),
+        h('p', { className: 'group' }, t.groupStyle),
+        this.stylePicker(),
         h('p', { className: 'group' }, t.groupSound),
         toggle('voice', t.optVoice),
         toggle('mute', t.optMute),
@@ -304,6 +307,24 @@ export class App {
       ),
     );
     this.updateBulk();
+  }
+
+  /** Three small swatches to choose how covers look. */
+  private stylePicker(): HTMLElement {
+    const t = this.t;
+    const row = h('div', { className: 'styles', role: 'radiogroup', 'aria-label': t.groupStyle });
+    for (const style of ['smart', 'black', 'brand'] as const) {
+      const input = h('input', { type: 'radio', name: 'mask-style', value: style, checked: this.settings.maskStyle === style, 'data-testid': `style-${style}` });
+      input.addEventListener('change', () => {
+        if (!input.checked) return;
+        this.settings.maskStyle = style;
+        saveSettings(this.settings);
+        for (const it of this.items) if (it.media === 'video' && it.status === 'ready') this.updateCard(it);
+        void this.rerenderAll();
+      });
+      row.appendChild(h('label', { className: `style-option style-${style}` }, input, h('span', { className: 'swatch', 'aria-hidden': 'true' }), h('span', {}, t.styleNames[style])));
+    }
+    return row;
   }
 
   private bindDrop(zone: HTMLElement): void {

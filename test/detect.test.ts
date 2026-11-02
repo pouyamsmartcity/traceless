@@ -173,3 +173,31 @@ describe('YOLOX person decoding', () => {
     expect(planPasses(4000, 3000, { faces: false, plates: false, people: true }).length).toBeGreaterThan(1);
   });
 });
+
+describe('cover shapes', () => {
+  it('a face ellipse contains the whole face box it was made from', async () => {
+    const { ellipseOf } = await import('../src/lib/masks');
+    const { expand } = await import('../src/lib/detect/geometry');
+    const face = { x: 100, y: 100, w: 80, h: 100 };
+    const grown = expand(face, 0.15, 0.2, 10_000, 10_000);
+    const e = ellipseOf(grown);
+    for (const [x, y] of [[face.x, face.y], [face.x + face.w, face.y], [face.x, face.y + face.h], [face.x + face.w, face.y + face.h]]) {
+      expect(((x! - e.cx) / e.rx) ** 2 + ((y! - e.cy) / e.ry) ** 2).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('turns a segmentation map into a grown silhouette, or nothing when too small', async () => {
+    const { silhouetteFromMap } = await import('../src/lib/detect/models');
+    const size = 32;
+    const map = new Float32Array(size * size);
+    for (let y = 8; y < 28; y++) for (let x = 10; x < 22; x++) map[y * size + x] = 1;
+    const sil = silhouetteFromMap(map, size, 16, 0.43)!;
+    expect(sil).toBeDefined();
+    expect(sil[4 * 16 + 5]).toBe(1); // inside
+    expect(sil[4 * 16 + 4]).toBe(1); // grown by one cell
+    expect(sil[1 * 16 + 1]).toBe(0); // far outside
+    const tiny = new Float32Array(size * size);
+    tiny[5 * size + 5] = 1;
+    expect(silhouetteFromMap(tiny, size, 16, 0.43)).toBeUndefined();
+  });
+});

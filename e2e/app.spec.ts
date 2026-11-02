@@ -53,15 +53,19 @@ async function regionColor(page: Page, rect: { x: number; y: number; w: number; 
       const ctx = c.getContext('2d')!;
       ctx.drawImage(img, 0, 0);
       const d = ctx.getImageData(rect.x, rect.y, rect.w, rect.h).data;
-      let r = 0, g = 0, b = 0, max = 0;
+      let r = 0, g = 0, b = 0, max = 0, lo = 255, hi = 0;
       for (let i = 0; i < d.length; i += 4) {
         r += d[i]!;
         g += d[i + 1]!;
         b += d[i + 2]!;
         max = Math.max(max, d[i]!, d[i + 1]!, d[i + 2]!);
+        const y = 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!;
+        lo = Math.min(lo, y);
+        hi = Math.max(hi, y);
       }
       const n = d.length / 4;
-      return { r: r / n, g: g / n, b: b / n, max, width: img.naturalWidth, height: img.naturalHeight };
+      // spread: brightness range inside the region; a cover is one solid colour, so its spread is tiny.
+      return { r: r / n, g: g / n, b: b / n, max, spread: hi - lo, width: img.naturalWidth, height: img.naturalHeight };
     },
     { url: href, rect },
   );
@@ -89,11 +93,16 @@ async function videoRegion(page: Page, t: number, rect: { x: number; y: number; 
       const d = ctx.getImageData(rect.x, rect.y, rect.w, rect.h).data;
       let max = 0;
       let sum = 0;
+      let lo = 255;
+      let hi = 0;
       for (let i = 0; i < d.length; i += 4) {
         max = Math.max(max, d[i]!, d[i + 1]!, d[i + 2]!);
         sum += d[i]! + d[i + 1]! + d[i + 2]!;
+        const y = 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!;
+        lo = Math.min(lo, y);
+        hi = Math.max(hi, y);
       }
-      return { max, mean: sum / (d.length * 0.75), width: v.videoWidth, height: v.videoHeight };
+      return { max, spread: hi - lo, mean: sum / (d.length * 0.75), width: v.videoWidth, height: v.videoHeight };
     },
     { url: href, t, rect },
   );
@@ -170,7 +179,7 @@ test.describe('Pakkon', () => {
     await expect(item.getByTestId('mask-summary')).toContainText('۱ صورت');
     // Reference face box (from the reference implementation): x 179-270, y 63-174.
     const face = await regionColor(page, { x: 195, y: 80, w: 60, h: 80 });
-    expect(face.max).toBeLessThan(8);
+    expect(face.spread).toBeLessThan(6);
     const outside = await regionColor(page, { x: 20, y: 400, w: 60, h: 60 });
     expect(outside.max).toBeGreaterThan(40);
   });
@@ -182,7 +191,7 @@ test.describe('Pakkon', () => {
     await expect(item.getByTestId('mask-summary')).toContainText('۱ پلاک');
     // Reference plate box: x 214-267, y 193-210.
     const plate = await regionColor(page, { x: 220, y: 196, w: 40, h: 10 });
-    expect(plate.max).toBeLessThan(8);
+    expect(plate.spread).toBeLessThan(6);
   });
 
   test('switching face covering off and on re-renders the copy', async ({ page }) => {
@@ -195,7 +204,7 @@ test.describe('Pakkon', () => {
     expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).max).toBeGreaterThan(40);
     await page.getByTestId('opt-faces').check();
     await readyItem(page);
-    expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).max).toBeLessThan(8);
+    expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).spread).toBeLessThan(6);
   });
 
   test('extra protection makes a smaller, slightly turned copy and still covers the face', async ({ page }) => {
@@ -209,7 +218,7 @@ test.describe('Pakkon', () => {
     const face = await regionColor(page, { x: 205, y: 95, w: 40, h: 50 });
     expect(face.width).toBeLessThan(512);
     expect(face.width).toBeGreaterThan(480);
-    expect(face.max).toBeLessThan(12);
+    expect(face.spread).toBeLessThan(10);
     // Corners hold picture, not empty background.
     const corner = await regionColor(page, { x: 0, y: 0, w: 4, h: 4 });
     expect(corner.max).toBeGreaterThan(20);
@@ -252,7 +261,7 @@ test.describe('Pakkon', () => {
     const item = await readyItem(page);
     await expect(item.getByTestId('mask-summary')).toContainText('نوشته');
     // The camera's date stamp in the top-right corner (reference box x 560-688, y 15-33) is covered.
-    expect((await regionColor(page, { x: 575, y: 19, w: 100, h: 10 })).max).toBeLessThan(8);
+    expect((await regionColor(page, { x: 575, y: 19, w: 100, h: 10 })).spread).toBeLessThan(6);
     // Tap the date-stamp cover in the editor to uncover it again.
     await page.getByTestId('edit').click();
     const canvas = page.locator('.editor-canvas');
@@ -303,7 +312,7 @@ test.describe('Pakkon', () => {
     await expect(page.getByTestId('extra-note')).toHaveCount(0);
     const face = await regionColor(page, { x: 195, y: 80, w: 60, h: 80 });
     expect(face.width).toBe(512);
-    expect(face.max).toBeLessThan(8);
+    expect(face.spread).toBeLessThan(6);
   });
 
   test('offers to cover the status bar of a phone screenshot', async ({ page }) => {
@@ -316,7 +325,7 @@ test.describe('Pakkon', () => {
     await item.getByTestId('cover-status-bar').click();
     await readyItem(page);
     await expect(item.getByTestId('cover-status-bar')).toHaveCount(0);
-    expect((await regionColor(page, { x: 0, y: 0, w: 1080, h: 120 })).max).toBeLessThan(8);
+    expect((await regionColor(page, { x: 40, y: 10, w: 1000, h: 100 })).spread).toBeLessThan(6);
     expect((await regionColor(page, { x: 100, y: 320, w: 200, h: 60 })).max).toBeGreaterThan(200); // the rest is kept
   });
 
@@ -420,7 +429,7 @@ test.describe('Pakkon', () => {
     await item.getByTestId('cover-chat-header').click();
     await readyItem(page);
     // The whole top quarter (status bar and header) is covered; once covered, both buttons disappear.
-    expect((await regionColor(page, { x: 0, y: 0, w: 1080, h: 260 })).max).toBeLessThan(8);
+    expect((await regionColor(page, { x: 80, y: 20, w: 920, h: 220 })).spread).toBeLessThan(6);
     await expect(item.getByTestId('cover-chat-header')).toHaveCount(0);
     await expect(item.getByTestId('cover-status-bar')).toHaveCount(0);
     expect((await regionColor(page, { x: 100, y: 320, w: 200, h: 60 })).max).toBeGreaterThan(200);
@@ -435,9 +444,11 @@ test.describe('Pakkon', () => {
     await page.getByTestId('opt-people').check();
     await readyItem(page);
     await expect(item.getByTestId('mask-summary')).toContainText('آدم');
-    expect((await regionColor(page, { x: 200, y: 380, w: 60, h: 60 })).max).toBeLessThan(8);
+    expect((await regionColor(page, { x: 200, y: 380, w: 60, h: 60 })).spread).toBeLessThan(6);
     // The background beside the person stays.
     expect((await regionColor(page, { x: 440, y: 60, w: 40, h: 40 })).max).toBeGreaterThan(60);
+    // The cover follows the person's outline: the flag inside the person's box (but beside her) is not covered.
+    expect((await regionColor(page, { x: 22, y: 60, w: 30, h: 60 })).spread).toBeGreaterThan(20);
   });
 
   test('holding "compare" shows the original, releasing shows the safe copy again', async ({ page }) => {
@@ -454,6 +465,31 @@ test.describe('Pakkon', () => {
     await expect(img).toHaveAttribute('src', safeSrc!);
     // The save link always points at the safe copy.
     await expect(item.getByTestId('save')).toHaveAttribute('href', safeSrc!);
+  });
+
+  test('cover looks: smart colour, black, and Pakkon green, all solid', async ({ page }) => {
+    await page.goto('/');
+    await addFile(page, fixture('real/astronaut.png'));
+    await readyItem(page);
+    const face = { x: 205, y: 95, w: 40, h: 50 };
+    let c = await regionColor(page, face);
+    expect(c.spread).toBeLessThan(6);
+    expect(c.max).toBeGreaterThan(30); // smart: a colour from the surroundings, not black
+    await page.getByTestId('style-black').check({ force: true });
+    await readyItem(page);
+    await page.waitForTimeout(500);
+    await readyItem(page);
+    c = await regionColor(page, face);
+    expect(c.max).toBeLessThan(8);
+    await page.getByTestId('style-brand').check({ force: true });
+    await readyItem(page);
+    await page.waitForTimeout(500);
+    await readyItem(page);
+    // Away from the eraser mark in the middle, the cover is Pakkon green (#126354).
+    c = await regionColor(page, { x: 200, y: 75, w: 50, h: 12 });
+    expect(Math.abs(c.r - 0x12)).toBeLessThan(6);
+    expect(Math.abs(c.g - 0x63)).toBeLessThan(6);
+    expect(Math.abs(c.b - 0x54)).toBeLessThan(6);
   });
 
   test('a cover can be drawn by hand', async ({ page }) => {
@@ -473,7 +509,7 @@ test.describe('Pakkon', () => {
     await readyItem(page);
     await expect(page.getByTestId('mask-summary')).toContainText('۱');
     const region = await regionColor(page, { x: 260, y: 200, w: 20, h: 20 });
-    expect(region.max).toBeLessThan(8);
+    expect(region.spread).toBeLessThan(6);
   });
 
   test('cleans a video: location, device and data track are gone', async ({ page }) => {
@@ -506,7 +542,7 @@ test.describe('Pakkon', () => {
         const cx = Math.round(224 - 30 * t);
         const face = await videoRegion(page, t, { x: cx - 20, y: 98, w: 40, h: 40 });
         expect(face.width).toBe(400);
-        expect(face.max, `face visible at ${t}s`).toBeLessThan(40);
+        expect(face.spread, `face visible at ${t}s`).toBeLessThan(25);
       }
       // The rest of the picture is still there.
       const corner = await videoRegion(page, 1.5, { x: 300, y: 300, w: 40, h: 40 });
@@ -524,7 +560,7 @@ test.describe('Pakkon', () => {
     for (const t of [0.6, 1.2, 1.8, 2.4]) {
       const cx = Math.round(449 - 150 * t);
       const face = await videoRegion(page, t, { x: cx - 20, y: 217, w: 40, h: 40 });
-      expect(face.max, `face visible at ${t}s`).toBeLessThan(40);
+      expect(face.spread, `face visible at ${t}s`).toBeLessThan(25);
     }
   });
 
@@ -553,7 +589,7 @@ test.describe('Pakkon', () => {
     await expect(item.getByTestId('video-masks')).toHaveAttribute('data-state', 'covered');
     // The camera's date stamp (x 560-688, y 15-33) is covered throughout.
     for (const t of [0.2, 1.0, 1.8]) {
-      expect((await videoRegion(page, t, { x: 575, y: 19, w: 100, h: 10 })).max, `text visible at ${t}s`).toBeLessThan(40);
+      expect((await videoRegion(page, t, { x: 575, y: 19, w: 100, h: 10 })).spread, `text visible at ${t}s`).toBeLessThan(25);
     }
   });
 
@@ -619,7 +655,7 @@ test.describe('Pakkon', () => {
     await readyItem(page);
     await expect(item.getByTestId('video-uncovered')).toHaveCount(0);
     await expect(item.getByTestId('rebuild')).toHaveCount(0);
-    expect((await videoRegion(page, 0.1, { x: 204, y: 98, w: 40, h: 40 })).max).toBeLessThan(40);
+    expect((await videoRegion(page, 0.1, { x: 204, y: 98, w: 40, h: 40 })).spread).toBeLessThan(25);
   });
 
   test('covers whole people in a video when asked', async ({ page }) => {
@@ -630,7 +666,7 @@ test.describe('Pakkon', () => {
     await expect(item.getByTestId('video-masks')).toContainText('کل آدم‌ها');
     // The orange suit (well inside the person) is covered throughout.
     for (const t of [0.2, 1.5, 2.8]) {
-      expect((await videoRegion(page, t, { x: 150 - Math.round(30 * t), y: 330, w: 50, h: 50 })).max, `body visible at ${t}s`).toBeLessThan(40);
+      expect((await videoRegion(page, t, { x: 150 - Math.round(30 * t), y: 330, w: 50, h: 50 })).spread, `body visible at ${t}s`).toBeLessThan(25);
     }
   });
 
@@ -661,7 +697,7 @@ test.describe('Pakkon', () => {
     await addFile(page, fixture('real/astronaut.png'));
     const item = await readyItem(page);
     await expect(item.getByTestId('mask-summary')).toContainText('۱ صورت');
-    expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).max).toBeLessThan(8);
+    expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).spread).toBeLessThan(6);
     await addFile(page, fixture('leaky/video-location.mp4'));
     await readyItem(page);
     await context.setOffline(false);

@@ -1,4 +1,5 @@
 import { expand, iou, type Rect } from './detect/geometry';
+import type { Cover } from './masks';
 
 /**
  * Faces and plates found in sampled video frames, and the masks to paint on every frame.
@@ -12,8 +13,8 @@ import { expand, iou, type Rect } from './detect/geometry';
 export interface TimedBoxes {
   /** Time of the sampled frame, in seconds. */
   t: number;
-  /** Boxes in display pixels of the full-size frame. */
-  boxes: Rect[];
+  /** Covers in display pixels of the full-size frame (shape kept: faces are ellipses). */
+  boxes: (Rect & { shape?: Cover['shape'] })[];
 }
 
 /** Extra margin around each box, as a share of the box size, to allow for movement between samples. */
@@ -24,7 +25,7 @@ function center(r: Rect): { x: number; y: number } {
 }
 
 /** Pairs boxes of two neighbouring samples that are probably the same face or plate. */
-export function matchBoxes(a: Rect[], b: Rect[]): [Rect, Rect][] {
+export function matchBoxes<T extends Rect>(a: T[], b: T[]): [T, T][] {
   const pairs: { i: number; j: number; score: number }[] = [];
   a.forEach((ra, i) =>
     b.forEach((rb, j) => {
@@ -40,7 +41,7 @@ export function matchBoxes(a: Rect[], b: Rect[]): [Rect, Rect][] {
   pairs.sort((p, q) => q.score - p.score);
   const usedA = new Set<number>();
   const usedB = new Set<number>();
-  const out: [Rect, Rect][] = [];
+  const out: [T, T][] = [];
   for (const p of pairs) {
     if (usedA.has(p.i) || usedB.has(p.j)) continue;
     usedA.add(p.i);
@@ -70,19 +71,19 @@ function sampleBefore(samples: TimedBoxes[], t: number): number {
 }
 
 /** The masks to paint on the frame shown at time `t` (seconds), in display pixels of a w x h frame. */
-export function masksAt(samples: TimedBoxes[], t: number, w: number, h: number): Rect[] {
+export function masksAt(samples: TimedBoxes[], t: number, w: number, h: number): Cover[] {
   if (!samples.length) return [];
   const i = sampleBefore(samples, t);
   const prev = i >= 0 ? samples[i] : undefined;
   const next = samples[i + 1];
-  const out: Rect[] = [];
-  const add = (r: Rect) => out.push(expand(r, MOTION_MARGIN, MOTION_MARGIN, w, h));
+  const out: Cover[] = [];
+  const add = (r: Rect & { shape?: Cover['shape'] }) => out.push({ ...expand(r, MOTION_MARGIN, MOTION_MARGIN, w, h), shape: r.shape ?? 'rounded' });
   // Hold boxes from the two samples on each side: covers one missed detection.
   for (const k of [i - 1, i, i + 1, i + 2]) for (const r of samples[k]?.boxes ?? []) add(r);
   // Follow moving objects between the two nearest samples.
   if (prev && next && next.t > prev.t) {
     const f = Math.min(1, Math.max(0, (t - prev.t) / (next.t - prev.t)));
-    for (const [a, b] of matchBoxes(prev.boxes, next.boxes)) add(lerp(a, b, f));
+    for (const [a, b] of matchBoxes(prev.boxes, next.boxes)) add({ ...lerp(a, b, f), shape: a.shape ?? 'rounded' });
   }
   return out.filter((r) => r.w > 0 && r.h > 0);
 }

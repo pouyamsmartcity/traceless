@@ -1,4 +1,4 @@
-import type { Rect } from './detect/geometry';
+import { paintCovers, type Cover, type MaskStyle } from './masks';
 import { inspectImage, sniffImage } from './inspect-image';
 import { jpegProblems, stripJpeg } from './jpeg';
 import { pngProblems, stripPng } from './png';
@@ -124,6 +124,8 @@ function addGrain(ctx: CanvasRenderingContext2D, w: number, h: number): void {
 export interface RenderOptions {
   /** Weaken the camera sensor pattern (smaller, slightly turned and trimmed picture, fresh grain). */
   extra?: boolean;
+  /** How covers look (all styles are solid; see masks.ts). */
+  style?: MaskStyle;
 }
 
 /**
@@ -131,7 +133,7 @@ export interface RenderOptions {
  * removes anything but picture data from it, and checks the result independently.
  * `masks` are in the decoded image's pixels.
  */
-export async function renderClean(img: DecodedImage, masks: Rect[], type: OutputType, opts: RenderOptions = {}): Promise<Uint8Array> {
+export async function renderClean(img: DecodedImage, masks: Cover[], type: OutputType, opts: RenderOptions = {}): Promise<Uint8Array> {
   const { width, height, scale } = outputSize(img.width, img.height);
   let canvas = document.createElement('canvas');
   canvas.width = width;
@@ -146,12 +148,7 @@ export async function renderClean(img: DecodedImage, masks: Rect[], type: Output
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img.element, 0, 0, width, height);
   // Masks are painted before any further transformation, so they move with the picture.
-  ctx.fillStyle = MASK_COLOR;
-  for (const m of masks) {
-    const x = Math.floor(m.x * scale);
-    const y = Math.floor(m.y * scale);
-    ctx.fillRect(x, y, Math.ceil((m.x + m.w) * scale) - x, Math.ceil((m.y + m.h) * scale) - y);
-  }
+  paintCovers(ctx, masks, opts.style ?? 'smart', scale, width, height);
   // A canvas the device could not allocate silently ends up with no size.
   if (canvas.width !== width || canvas.height !== height) throw new ImageCleanError('tooLarge', 'drawing surface failed');
 

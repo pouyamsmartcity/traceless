@@ -1,7 +1,8 @@
 import type { Rect } from '../lib/detect/geometry';
 import { ICONS, h, icon } from './dom';
 import type { Strings } from './i18n';
-import { kindEnabled, type Item, type Options } from './pipeline';
+import { coverContains, paintCovers, traceCover, type Cover } from '../lib/masks';
+import { coverOf, kindEnabled, type Item, type Options } from './pipeline';
 
 /**
  * Full-screen editor to add masks by dragging and to remove or restore masks by tapping.
@@ -54,36 +55,39 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
   function draw(): void {
     ctx.drawImage(img!.element, 0, 0, img!.width, img!.height);
     const lw = 2 / scale;
+    const outline = (c: Cover, colour: string, dashed: boolean) => {
+      ctx.setLineDash(dashed ? [6 / scale, 4 / scale] : []);
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = lw;
+      traceCover(ctx, c, 1);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    // Covers are shown in their real shapes, a little see-through so the user can judge what is under them.
     item.detections.forEach((d, i) => {
       if (!autoEnabled(i)) return;
-      if (removed.has(i)) {
-        ctx.setLineDash([6 / scale, 4 / scale]);
-        ctx.strokeStyle = '#ffd400';
-        ctx.lineWidth = lw;
-        ctx.strokeRect(d.x, d.y, d.w, d.h);
-        ctx.setLineDash([]);
-      } else {
-        ctx.fillStyle = 'rgba(0,0,0,0.85)';
-        ctx.fillRect(d.x, d.y, d.w, d.h);
-        ctx.strokeStyle = '#3ddc84';
-        ctx.lineWidth = lw;
-        ctx.strokeRect(d.x, d.y, d.w, d.h);
+      const c = coverOf(d);
+      if (removed.has(i)) outline(c, '#ffd400', true);
+      else {
+        ctx.globalAlpha = 0.82;
+        paintCovers(ctx, [c], 'black', 1, img!.width, img!.height);
+        ctx.globalAlpha = 1;
+        outline(c, '#3ddc84', false);
       }
     });
     for (const m of manual) {
-      ctx.fillStyle = 'rgba(0,0,0,0.85)';
-      ctx.fillRect(m.x, m.y, m.w, m.h);
-      ctx.strokeStyle = '#4da3ff';
-      ctx.lineWidth = lw;
-      ctx.strokeRect(m.x, m.y, m.w, m.h);
+      const c: Cover = { ...m, shape: 'rounded' };
+      ctx.globalAlpha = 0.82;
+      paintCovers(ctx, [c], 'black', 1, img!.width, img!.height);
+      ctx.globalAlpha = 1;
+      outline(c, '#4da3ff', false);
     }
     if (drag) {
-      const r = norm(drag);
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = '#4da3ff';
-      ctx.lineWidth = lw;
-      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      const c: Cover = { ...norm(drag), shape: 'rounded' };
+      ctx.globalAlpha = 0.6;
+      paintCovers(ctx, [c], 'black', 1, img!.width, img!.height);
+      ctx.globalAlpha = 1;
+      outline(c, '#4da3ff', false);
     }
   }
 
@@ -116,7 +120,7 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
       }
     }
     for (let i = item.detections.length - 1; i >= 0; i--) {
-      if (!autoEnabled(i) || !inside(item.detections[i]!, p)) continue;
+      if (!autoEnabled(i) || !coverContains(coverOf(item.detections[i]!), p.x, p.y)) continue;
       if (removed.has(i)) {
         removed.delete(i);
         record(() => removed.add(i));

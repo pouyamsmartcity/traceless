@@ -3,7 +3,7 @@
  * Kept free of browser APIs so it can be unit-tested in Node.
  */
 
-export type ModelId = 'face' | 'plate' | 'text' | 'person';
+export type ModelId = 'face' | 'plate' | 'text' | 'person' | 'seg';
 
 export interface ModelSpec {
   id: ModelId;
@@ -17,8 +17,8 @@ export interface ModelSpec {
   threshold: number;
 }
 
-/** bgr255: BGR 0..255. rgb01: RGB 0..1. bgrImagenet: BGR, 0..1, then ImageNet mean/std (PaddleOCR). */
-export type PixelFormat = 'bgr255' | 'rgb01' | 'bgrImagenet';
+/** bgr255: BGR 0..255. rgb01: RGB 0..1. bgrImagenet/rgbImagenet: 0..1, then ImageNet mean/std. */
+export type PixelFormat = 'bgr255' | 'rgb01' | 'bgrImagenet' | 'rgbImagenet';
 
 /** PaddleOCR detection: pixels above this probability are text; a region needs this mean probability. */
 export const TEXT_PIXEL_THRESHOLD = 0.2;
@@ -31,6 +31,8 @@ export const MODELS: Record<ModelId, ModelSpec> = {
   plate: { id: 'plate', file: 'models/plate-yolov9t-640.onnx', inputName: 'images', size: 640, pad: 114, pixels: 'rgb01', threshold: 0.3 },
   // YOLOX-nano (Megvii, Apache-2.0), COCO classes; we use "person". 416x416 input, BGR 0..255.
   person: { id: 'person', file: 'models/person-yolox-nano.onnx', inputName: 'images', size: 416, pad: 114, pixels: 'bgr255', threshold: 0.35 },
+  // U-2-Net small (Apache-2.0): outlines the main subject of a crop; used to draw a person's silhouette.
+  seg: { id: 'seg', file: 'models/person-seg-u2netp.onnx', inputName: 'input.1', size: 320, pad: 0, pixels: 'rgbImagenet', threshold: 0.43 },
   // PaddleOCR PP-OCRv3 text detection (Apache-2.0). Any size that is a multiple of 32. Outputs a text probability map.
   text: { id: 'text', file: 'models/text-ppocrv3-det.onnx', inputName: 'x', size: 0, pad: 0, pixels: 'bgrImagenet', threshold: TEXT_BOX_THRESHOLD },
 };
@@ -48,12 +50,13 @@ export function toTensorWH(rgba: Uint8ClampedArray | Uint8Array, w: number, h: n
   const n = w * h;
   if (rgba.length !== n * 4) throw new Error(`expected ${n * 4} bytes, got ${rgba.length}`);
   const out = new Float32Array(3 * n);
-  if (pixels === 'bgrImagenet') {
+  if (pixels === 'bgrImagenet' || pixels === 'rgbImagenet') {
     // PaddleOCR reads images as BGR and normalises channel 0 (blue) with the first mean/std values.
+    const [c0, c2] = pixels === 'bgrImagenet' ? [2, 0] : [0, 2];
     for (let i = 0; i < n; i++) {
-      out[i] = (rgba[i * 4 + 2]! / 255 - MEAN[0]!) / STD[0]!;
+      out[i] = (rgba[i * 4 + c0]! / 255 - MEAN[0]!) / STD[0]!;
       out[n + i] = (rgba[i * 4 + 1]! / 255 - MEAN[1]!) / STD[1]!;
-      out[2 * n + i] = (rgba[i * 4]! / 255 - MEAN[2]!) / STD[2]!;
+      out[2 * n + i] = (rgba[i * 4 + c2]! / 255 - MEAN[2]!) / STD[2]!;
     }
     return out;
   }
@@ -191,4 +194,55 @@ export function decodeTextMap(prob: Float32Array, w: number, h: number, pixelThr
     boxes.push({ x1: x1 - d, y1: y1 - d, x2: x2 + 1 + d, y2: y2 + 1 + d, score });
   }
   return boxes;
+}
+
+/**
+ * Turns a segmentation map (size x size, any range) into a low-resolution silhouette (out x out, 1 = person),
+ * normalised like the reference implementation (min-max), thresholded, and grown by one cell for a safe edge.
+ * Returns undefined when the outline is too small to trust (the caller then covers the whole box).
+ */
+export function silhouetteFromMap(map: Float32Array, size: number, out: number, threshold: number): Uint8Array | undefined {
+  if (map.length !== size * size) throw new Error('unexpected map size');
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of map) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  const range = hi - lo || 1;
+  const cells = new Uint8Array(out * out);
+  const f = size / out;
+  for (let y = 0; y < out; y++) {
+    for (let x = 0; x < out; x++) {
+      // A cell is part of the person if any of its pixels is (safer than averaging).
+      let on = 0;
+      for (let yy = Math.floor(y * f); yy < Math.floor((y + 1) * f) && !on; yy++) {
+        for (let xx = Math.floor(x * f); xx < Math.floor((x + 1) * f); xx++) {
+          if ((map[yy * size + xx]! - lo) / range > threshold) {
+            on = 1;
+            break;
+          }
+        }
+      }
+      cells[y * out + x] = on;
+    }
+  }
+  const grown = new Uint8Array(out * out);
+  let count = 0;
+  for (let y = 0; y < out; y++) {
+    for (let x = 0; x < out; x++) {
+      let on = 0;
+      for (let dy = -1; dy <= 1 && !on; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy;
+        const xx = x + dx;
+        if (yy >= 0 && yy < out && xx >= 0 && xx < out && cells[yy * out + xx]) {
+          on = 1;
+          break;
+        }
+      }
+      grown[y * out + x] = on;
+      count += on;
+    }
+  }
+  return count / (out * out) < 0.12 ? undefined : grown;
 }

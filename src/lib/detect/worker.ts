@@ -13,7 +13,7 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: 'ready' }
-  | { type: 'result'; id: number; boxes: RawBox[] }
+  | { type: 'result'; id: number; boxes: RawBox[]; map?: Float32Array }
   | { type: 'error'; id?: number; message: string };
 
 const sessions = new Map<ModelId, Promise<ort.InferenceSession>>();
@@ -33,7 +33,7 @@ function session(model: ModelId): Promise<ort.InferenceSession> {
   return s;
 }
 
-async function run(model: ModelId, tensor: Float32Array, width: number, height: number): Promise<RawBox[]> {
+async function run(model: ModelId, tensor: Float32Array, width: number, height: number): Promise<RawBox[] | Float32Array> {
   const spec = MODELS[model];
   const s = await session(model);
   const input = new ort.Tensor('float32', tensor, [1, 3, height, width]);
@@ -48,6 +48,7 @@ async function run(model: ModelId, tensor: Float32Array, width: number, height: 
     if (!first) throw new Error(`${model} model returned nothing`);
     if (model === 'text') return decodeTextMap(first.data as Float32Array, width, height, TEXT_PIXEL_THRESHOLD, spec.threshold);
     if (model === 'person') return decodeYolox(first.data as Float32Array, spec.size, spec.threshold, 0);
+    if (model === 'seg') return new Float32Array(first.data as Float32Array);
     return decodePlates(first.data as Float32Array, spec.threshold);
   } finally {
     input.dispose();
@@ -77,8 +78,9 @@ if (!isRuntimeThread) scope.onmessage = async (e: MessageEvent<WorkerRequest>) =
     return;
   }
   try {
-    const boxes = await run(msg.model, msg.tensor, msg.width, msg.height);
-    scope.postMessage({ type: 'result', id: msg.id, boxes } satisfies WorkerResponse);
+    const r = await run(msg.model, msg.tensor, msg.width, msg.height);
+    if (r instanceof Float32Array) scope.postMessage({ type: 'result', id: msg.id, boxes: [], map: r } satisfies WorkerResponse, [r.buffer]);
+    else scope.postMessage({ type: 'result', id: msg.id, boxes: r } satisfies WorkerResponse);
   } catch (err) {
     scope.postMessage({ type: 'error', id: msg.id, message: err instanceof Error ? err.message : String(err) } satisfies WorkerResponse);
   }

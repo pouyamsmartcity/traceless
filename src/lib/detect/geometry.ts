@@ -9,6 +9,8 @@ export interface Rect {
 export interface Detection extends Rect {
   score: number;
   kind: 'face' | 'plate' | 'text' | 'person';
+  /** People in photos: their outline inside the box (1 = person), when the segmentation network found it. */
+  silhouette?: { w: number; h: number; data: Uint8Array };
 }
 
 export function iou(a: Rect, b: Rect): number {

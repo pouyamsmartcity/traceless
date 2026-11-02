@@ -12,7 +12,9 @@ which device a picture was taken, and covers faces and licence plates with solid
   cropped screenshots stay behind. The new file is checked again before you get it.
 - **Faces and plates covered, in photos and videos.** On-device detection finds faces (also small faces in crowds)
   and licence plates, including Iranian plates. Covers are solid fills, because blur and pixelation can sometimes be
-  reversed. You can add or remove covers by hand. In videos, every frame is covered, following moving people.
+  reversed, drawn in clean shapes: ovals for faces, rounded shapes for plates and text, and each person's own
+  silhouette (found by a segmentation network) when whole people are covered. Three looks: "smart" (a colour taken
+  from around the cover, so it sits naturally in the picture), black, and Pakkon's green with its eraser mark. You can add or remove covers by hand. In videos, every frame is covered, following moving people.
 - **Whole people covered on request** (body, clothes, hair), for when clothes or hair could identify someone
   (YOLOX-nano person detection, Apache-2.0).
 - **Text covered on request.** Street and shop signs, names and numbers (Persian and Latin script) can be covered

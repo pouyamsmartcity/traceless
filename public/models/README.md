@@ -7,13 +7,14 @@ These files run on the user's device. They are never downloaded from anywhere el
 | `face-yunet-2023mar.onnx` | Faces | [OpenCV Zoo, YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) (`face_detection_yunet_2023mar.onnx`) | MIT (below) | `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4` |
 | `text-ppocrv3-det.onnx` | Text (signs, names, numbers) | [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) PP-OCRv3 detection model `ch_PP-OCRv3_det_infer.onnx`, as converted to ONNX by [RapidOCR](https://github.com/RapidAI/RapidOCR) (`rapidocr_onnxruntime` 1.2.3) | Apache-2.0 | `3439588c030faea393a54515f51e983d8e155b19a2e8aba7891934c1cf0de526` |
 | `person-yolox-nano.onnx` | Whole people (optional) | [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX) release `0.1.1rc0`, `yolox_nano.onnx` (COCO; the "person" class is used) | Apache-2.0 | `c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d` |
+| `person-seg-u2netp.onnx` | Outlines of people (for silhouette covers) | [U-2-Net](https://github.com/xuebinqin/U-2-Net) small model `u2netp`, ONNX as published by [rembg](https://github.com/danielgatis/rembg) release `v0.0.0` | Apache-2.0 | `309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8` |
 | `plate-yolov9t-640.onnx` | Licence plates | [open-image-models](https://github.com/ankandrew/open-image-models) release `assets`, `yolo-v9-t-640-license-plates-end2end.onnx` | MIT (below) | `c3c1026ca7d0585dd88084d68182dd897113712fa734ae1557ca70174440c076` |
 
 Note: the plate model was trained with the YOLOv9 training code, which is GPL-3.0. The model publisher releases the
 weights under MIT. We ship the weights unchanged as separate files.
 
-The text and person models are used under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0); it is shipped
-unchanged (both).
+The text, person and outline models are used under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0); it is shipped
+unchanged.
 
 ## YuNet licence
 

@@ -16,7 +16,7 @@ import { sourceFromBlob } from './bytes';
 import { assertSaneMovie, inspectVideo } from './bmff';
 import { finishVideo, soundConversion, type CleanVideoResult } from './clean-video';
 import type { Detector } from './detect/detector';
-import { MASK_COLOR } from './clean-image';
+import { paintCovers, type MaskStyle } from './masks';
 import { masksAt, sampleTimes, type TimedBoxes } from './video-timeline';
 import { VideoCleanError } from './video-errors';
 
@@ -34,6 +34,8 @@ export interface MaskedVideoOptions {
   text?: boolean;
   /** Also cover whole people. */
   people?: boolean;
+  /** How covers look. */
+  style?: MaskStyle;
   /** Leave the sound out. */
   mute?: boolean;
   /** Change voices. */
@@ -109,7 +111,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       } catch (e) {
         throw new VideoCleanError('cannotMask', `detection failed: ${e instanceof Error ? e.message : String(e)}`);
       }
-      const boxes = found.map((d) => ({ x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale }));
+      const boxes = found.map((d) => ({ x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale, shape: d.kind === 'face' ? ('ellipse' as const) : ('rounded' as const) }));
       if (boxes.length) framesWithMasks++;
       maxObjects = Math.max(maxObjects, boxes.length);
       timeline.push({ t: wrapped.timestamp ?? t, boxes });
@@ -150,13 +152,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
           }
           sample.draw(ctx, 0, 0, sw, sh);
           const fx = sw / W;
-          const fy = sh / H;
-          ctx.fillStyle = MASK_COLOR;
-          for (const m of masksAt(timeline, sample.timestamp + shift, W, H)) {
-            const x = Math.floor(m.x * fx);
-            const y = Math.floor(m.y * fy);
-            ctx.fillRect(x, y, Math.ceil((m.x + m.w) * fx) - x, Math.ceil((m.y + m.h) * fy) - y);
-          }
+          paintCovers(ctx, masksAt(timeline, sample.timestamp + shift, W, H), opts.style ?? 'smart', fx, sw, sh);
           return canvas;
         },
       },
