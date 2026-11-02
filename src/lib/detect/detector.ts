@@ -5,8 +5,10 @@ import type { WorkerRequest, WorkerResponse } from './worker';
 /** Longest side (pixels) of the picture the detectors look at. Larger photos are scaled down for detection only. */
 const DETECT_MAX_SIDE = 2048;
 /** Tile sides at detection scale: small tiles help to find small, far-away faces in crowds. */
-const FACE_TILE = 512;
+const FACE_TILE = 640;
 const PLATE_TILE = 1152;
+/** First run includes loading the runtime and models; later runs take well under a second. */
+const INFER_TIMEOUT_MS = 120_000;
 
 export interface DetectOptions {
   faces: boolean;
@@ -76,7 +78,6 @@ export class Detector {
       w.onerror = (e) => {
         const err = new Error(e.message || 'detector worker failed');
         reject(err);
-        for (const id of [...this.pending.keys()]) this.settle(id, err);
         this.reset();
       };
       w.postMessage({ type: 'init', base: this.base } satisfies WorkerRequest);
@@ -85,6 +86,8 @@ export class Detector {
   }
 
   private reset(): void {
+    const err = new Error('detector restarted');
+    for (const id of [...this.pending.keys()]) this.settle(id, err);
     this.worker?.terminate();
     this.worker = undefined;
     this.ready = undefined;
@@ -103,7 +106,24 @@ export class Detector {
     await this.start();
     const id = this.nextId++;
     return new Promise<RawBox[]>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      // Never hang: if the model does not answer in time, give up (the photo is still cleaned,
+      // and the user is told to cover things by hand) and start a fresh worker next time.
+      const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
+        this.pending.delete(id);
+        reject(new Error('detector timed out'));
+        this.reset();
+      }, INFER_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (b) => {
+          clearTimeout(timer);
+          resolve(b);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
       this.worker!.postMessage({ type: 'run', id, model, tensor } satisfies WorkerRequest, [tensor.buffer]);
     });
   }
@@ -113,7 +133,8 @@ export class Detector {
     this.start().catch(() => undefined);
   }
 
-  private prepare(source: CanvasImageSource, lb: Letterbox, pad: number, pixels: 'bgr255' | 'rgb01'): Float32Array {
+  /** `srcScale` maps source-image pixels to pixels of `source` (which may be a pre-shrunk copy). */
+  private prepare(source: CanvasImageSource, srcScale: number, lb: Letterbox, pad: number, pixels: 'bgr255' | 'rgb01'): Float32Array {
     const size = lb.size;
     if (!this.canvas) {
       this.canvas = document.createElement('canvas');
@@ -127,22 +148,54 @@ export class Detector {
     const r = lb.region;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(source, r.x, r.y, r.w, r.h, lb.padX, lb.padY, Math.round(r.w * lb.scale), Math.round(r.h * lb.scale));
+    ctx.drawImage(
+      source,
+      r.x * srcScale,
+      r.y * srcScale,
+      r.w * srcScale,
+      r.h * srcScale,
+      lb.padX,
+      lb.padY,
+      Math.round(r.w * lb.scale),
+      Math.round(r.h * lb.scale),
+    );
     return toTensor(ctx.getImageData(0, 0, size, size).data, size, pixels);
   }
 
   /** Finds faces and licence plates. Returns mask boxes in source pixels. */
   async detect(source: CanvasImageSource, w: number, h: number, opts: DetectOptions): Promise<Detection[]> {
     const passes = planPasses(w, h, opts);
+    if (!passes.length) return [];
+    // Shrink a big photo once to detection size, instead of once per pass.
+    const scale = Math.min(1, DETECT_MAX_SIDE / Math.max(w, h));
+    let work: CanvasImageSource = source;
+    let shrunk: HTMLCanvasElement | undefined;
+    if (scale < 1) {
+      shrunk = document.createElement('canvas');
+      shrunk.width = Math.max(1, Math.round(w * scale));
+      shrunk.height = Math.max(1, Math.round(h * scale));
+      const sctx = shrunk.getContext('2d');
+      if (!sctx) throw new Error('canvas unavailable');
+      sctx.imageSmoothingQuality = 'high';
+      sctx.drawImage(source, 0, 0, shrunk.width, shrunk.height);
+      work = shrunk;
+    }
     const found: { model: ModelId; box: Rect; score: number }[] = [];
     let done = 0;
-    for (const pass of passes) {
-      const spec = MODELS[pass.model];
-      const lb = letterbox(pass.region, spec.size);
-      const tensor = this.prepare(source, lb, spec.pad, spec.pixels);
-      const boxes = await this.infer(pass.model, tensor);
-      for (const b of boxes) found.push({ model: pass.model, box: unletterbox(b, lb), score: b.score });
-      opts.onProgress?.(++done / passes.length);
+    try {
+      for (const pass of passes) {
+        const spec = MODELS[pass.model];
+        const lb = letterbox(pass.region, spec.size);
+        const tensor = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels);
+        const boxes = await this.infer(pass.model, tensor);
+        for (const b of boxes) found.push({ model: pass.model, box: unletterbox(b, lb), score: b.score });
+        opts.onProgress?.(++done / passes.length);
+      }
+    } finally {
+      if (shrunk) {
+        shrunk.width = 0;
+        shrunk.height = 0;
+      }
     }
     return mergeDetections(found, w, h);
   }

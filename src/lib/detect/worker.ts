@@ -55,11 +55,16 @@ async function run(model: ModelId, tensor: Float32Array): Promise<RawBox[]> {
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
-scope.onmessage = async (e: MessageEvent<WorkerRequest>) => {
+// When several cores are used, the runtime starts helper workers from this same file, named
+// "em-pthread". Those belong to the runtime: they must not take over its message handler.
+const isRuntimeThread = scope.name?.startsWith('em-pthread') ?? false;
+
+if (!isRuntimeThread) scope.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data;
   if (msg.type === 'init') {
     base = msg.base;
-    ort.env.wasm.numThreads = 1;
+    // Several cores when the page is cross-origin isolated (after the offline worker is installed), else one.
+    ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)) : 1;
     ort.env.wasm.proxy = false;
     // The runtime's .wasm file is bundled next to this worker by the build and loaded from this site.
     ort.env.logLevel = 'error';

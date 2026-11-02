@@ -35,6 +35,20 @@ async function receiveShare(request) {
   return Response.redirect('./?shared=1', 303);
 }
 
+/**
+ * Adds cross-origin isolation headers to our own responses. This lets the detector use several
+ * processor cores (it needs SharedArrayBuffer). It only restricts the page further: nothing from
+ * other sites may be embedded, which the page never does anyway.
+ */
+function isolated(response) {
+  if (!response || response.status !== 200 || response.type === 'opaque') return response;
+  const headers = new Headers(response.headers);
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+  headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -45,8 +59,8 @@ self.addEventListener('fetch', (event) => {
   }
   if (request.method !== 'GET') return;
   if (request.mode === 'navigate') {
-    event.respondWith(caches.match('./index.html', { cacheName: CACHE, ignoreVary: true }).then((r) => r || fetch(request)));
+    event.respondWith(caches.match('./index.html', { cacheName: CACHE, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));
     return;
   }
-  event.respondWith(caches.match(request, { cacheName: CACHE, ignoreSearch: true, ignoreVary: true }).then((r) => r || fetch(request)));
+  event.respondWith(caches.match(request, { cacheName: CACHE, ignoreSearch: true, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));
 });

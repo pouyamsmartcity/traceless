@@ -208,9 +208,14 @@ test.describe('Pakkon', () => {
     await expect(page.getByTestId('offline-badge')).toContainText('آمادهٔ کار بدون اینترنت', { timeout: 90_000 });
     await context.setOffline(true);
     await page.reload();
+    // Served by the offline worker with isolation headers, so detection can use several cores.
+    expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
     await addFile(page, fixture('real/astronaut.png'));
     const item = await readyItem(page);
     await expect(item.getByTestId('mask-summary')).toContainText('۱ صورت');
+    expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).max).toBeLessThan(8);
+    await addFile(page, fixture('leaky/video-location.mp4'));
+    await readyItem(page);
     await context.setOffline(false);
   });
 

@@ -350,7 +350,20 @@ export class App {
     const order = { high: 0, medium: 1, low: 2 } as const;
     const sorted = [...item.findings].sort((a, b) => order[a.severity] - order[b.severity]);
     const list = h('ul', {});
-    for (const f of sorted) list.appendChild(this.findingRow(f, lang));
+    // One row per kind of leak; several values of the same kind are shown together.
+    const groups = new Map<string, Finding[]>();
+    for (const f of sorted) groups.set(f.id, [...(groups.get(f.id) ?? []), f]);
+    for (const fs of groups.values()) {
+      const withGeo = fs.filter((f) => f.geo);
+      if (withGeo.length) {
+        for (const f of withGeo) list.appendChild(this.findingRow(f, lang));
+        continue;
+      }
+      const values = [...new Set(fs.map((f) => f.value).filter((v): v is string => Boolean(v)))];
+      const merged: Finding = { id: fs[0]!.id, severity: fs[0]!.severity };
+      if (values.length) merged.value = values.join(' · ');
+      list.appendChild(this.findingRow(merged, lang));
+    }
     box.appendChild(list);
     if (item.partial) box.appendChild(h('p', { className: 'note' }, t.partialNote));
     if (item.status === 'ready') box.appendChild(h('p', { className: 'removed' }, icon(ICONS.check, 16), t.removedNote));
