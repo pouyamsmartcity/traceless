@@ -1,16 +1,9 @@
 import { ALL_FORMATS, BlobSource, BufferTarget, Conversion, Input, Mp4OutputFormat, Output } from 'mediabunny';
 import { sourceFromBlob, sourceFromBytes } from './bytes';
 import { inspectVideo, zeroMovieTimes } from './bmff';
+import { VideoCleanError } from './video-errors';
 
-export class VideoCleanError extends Error {
-  constructor(
-    readonly reason: 'unsupported' | 'noVideo' | 'leftovers' | 'failed',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'VideoCleanError';
-  }
-}
+export { VideoCleanError };
 
 export interface CleanVideoResult {
   bytes: Uint8Array;

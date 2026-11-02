@@ -1,0 +1,423 @@
+import { Detector } from '../lib/detect/detector';
+import type { Finding } from '../lib/findings';
+import { loadPlaces, nearest, type Place } from '../lib/places';
+import { ICONS, append, clear, h, icon } from './dom';
+import { openEditor } from './editor';
+import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
+import { newItem, processItem, renderImage, type Item, type Options } from './pipeline';
+
+interface Settings extends Options {
+  lang: Lang;
+}
+
+function loadSettings(): Settings {
+  const defaults: Settings = { lang: 'fa', faces: true, plates: true };
+  try {
+    const raw = localStorage.getItem('pakkon-settings');
+    if (raw) {
+      const s = JSON.parse(raw) as Partial<Settings>;
+      return {
+        lang: s.lang === 'en' ? 'en' : 'fa',
+        faces: s.faces !== false,
+        plates: s.plates !== false,
+      };
+    }
+  } catch {
+    // Private mode or blocked storage: use defaults.
+  }
+  return defaults;
+}
+
+function saveSettings(s: Settings): void {
+  try {
+    localStorage.setItem('pakkon-settings', JSON.stringify(s));
+  } catch {
+    // Not important if it cannot be saved.
+  }
+}
+
+export class App {
+  private settings = loadSettings();
+  private readonly items: Item[] = [];
+  private readonly cards = new Map<number, HTMLElement>();
+  private readonly detector: Detector;
+  private queue: Promise<void> = Promise.resolve();
+  private places: Place[] | undefined;
+  private listEl!: HTMLElement;
+  private bulkEl!: HTMLElement;
+  private installPrompt: (Event & { prompt?: () => Promise<void> }) | undefined;
+  private offlineReady = false;
+
+  constructor(
+    private readonly root: HTMLElement,
+    private readonly base: string,
+  ) {
+    this.detector = new Detector(base);
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      this.installPrompt = e;
+      this.render();
+    });
+  }
+
+  private get t(): Strings {
+    return STRINGS[this.settings.lang];
+  }
+
+  start(): void {
+    this.render();
+    // Prepare the detectors in the background so the first photo is quick.
+    const idle = (cb: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(cb, { timeout: 3000 }) : setTimeout(cb, 1500));
+    idle(() => {
+      this.detector.warmUp();
+      loadPlaces(this.base)
+        .then((p) => {
+          this.places = p;
+          for (const item of this.items) this.updateCard(item);
+        })
+        .catch(() => undefined);
+    });
+  }
+
+  setOfflineReady(): void {
+    this.offlineReady = true;
+    this.render();
+  }
+
+  /** Adds files from the picker, drag and drop, paste or the system share sheet. */
+  addFiles(files: Iterable<File>): void {
+    for (const file of files) {
+      const item = newItem(file);
+      this.items.unshift(item);
+      this.listEl.prepend(this.cardFor(item));
+      this.updateCard(item);
+      this.queue = this.queue.then(() => processItem(item, this.settings, this.detector, () => this.updateCard(item)));
+    }
+    this.updateBulk();
+  }
+
+  private render(): void {
+    const t = this.t;
+    document.documentElement.lang = this.settings.lang;
+    document.documentElement.dir = this.settings.lang === 'fa' ? 'rtl' : 'ltr';
+    document.title = `${t.appName} · ${t.tagline}`;
+    clear(this.root);
+
+    const input = h('input', {
+      type: 'file',
+      accept: 'image/*,video/*,.heic,.heif',
+      multiple: true,
+      className: 'visually-hidden',
+      'data-testid': 'file-input',
+    });
+    input.addEventListener('change', () => {
+      if (input.files?.length) this.addFiles(Array.from(input.files));
+      input.value = '';
+    });
+
+    const toggle = (key: 'faces' | 'plates', label: string) => {
+      const box = h('input', { type: 'checkbox', checked: this.settings[key], 'data-testid': `opt-${key}` });
+      box.addEventListener('change', () => {
+        this.settings[key] = box.checked;
+        saveSettings(this.settings);
+        void this.rerenderAll();
+      });
+      return h('label', { className: 'switch' }, box, h('span', {}, label));
+    };
+
+    const langBtn = h('button', { type: 'button', className: 'btn ghost small', lang: this.settings.lang === 'fa' ? 'en' : 'fa' }, t.langSwitch);
+    langBtn.addEventListener('click', () => {
+      this.settings.lang = this.settings.lang === 'fa' ? 'en' : 'fa';
+      saveSettings(this.settings);
+      this.cards.clear();
+      this.render();
+    });
+
+    const isIos = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = window.matchMedia?.('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+    let installEl: HTMLElement | null = null;
+    if (!standalone && this.installPrompt) {
+      installEl = h('button', { type: 'button', className: 'btn ghost small' }, t.install);
+      installEl.addEventListener('click', () => {
+        void this.installPrompt?.prompt?.();
+        this.installPrompt = undefined;
+      });
+    } else if (!standalone && isIos) {
+      installEl = h('p', { className: 'hint' }, t.installIos);
+    }
+
+    this.listEl = h('section', { className: 'items', 'aria-live': 'polite' });
+    for (const item of this.items) {
+      this.listEl.appendChild(this.cardFor(item));
+      this.updateCard(item);
+    }
+    this.bulkEl = h('div', { className: 'bulk' });
+
+    const dropZone = h(
+      'section',
+      { className: 'picker' },
+      h('label', { className: 'pick-btn' }, input, icon(ICONS.plus, 28), h('span', {}, t.pick)),
+      h('p', { className: 'hint' }, t.pickHint),
+      h('div', { className: 'options' }, toggle('faces', t.optFaces), toggle('plates', t.optPlates)),
+    );
+    this.bindDrop(dropZone);
+
+    append(
+      this.root,
+      h(
+        'header',
+        { className: 'top' },
+        h('div', { className: 'brand' }, h('span', { className: 'logo' }, icon(ICONS.eraser, 26)), h('div', {}, h('h1', {}, t.appName), h('p', {}, t.tagline))),
+        langBtn,
+      ),
+      h(
+        'p',
+        { className: 'badge', 'data-testid': 'offline-badge' },
+        icon(ICONS.lock, 16),
+        t.offlineBadge,
+        this.offlineReady ? h('span', { className: 'ready' }, ` · ${t.offlineReady}`) : null,
+      ),
+      dropZone,
+      this.bulkEl,
+      this.listEl,
+      h('details', { className: 'info' }, h('summary', {}, t.howTitle), h('ul', {}, ...t.how.map((s) => h('li', {}, s)))),
+      h('details', { className: 'info' }, h('summary', {}, t.limitsTitle), h('ul', {}, ...t.limits.map((s) => h('li', {}, s)))),
+      installEl,
+      h(
+        'footer',
+        {},
+        h('p', {}, t.footer, ' · ', h('a', { href: 'https://www.pouyam.com', rel: 'noopener', target: '_blank' }, 'pouyam.com')),
+        h('p', { className: 'small' }, t.dataCredit),
+      ),
+    );
+    this.updateBulk();
+  }
+
+  private bindDrop(zone: HTMLElement): void {
+    zone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      zone.classList.add('drag');
+    });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('drag');
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length) this.addFiles(files);
+    });
+  }
+
+  private cardFor(item: Item): HTMLElement {
+    let card = this.cards.get(item.id);
+    if (!card) {
+      card = h('article', { className: 'card', 'data-testid': 'item' });
+      this.cards.set(item.id, card);
+    }
+    return card;
+  }
+
+  private async rerenderAll(): Promise<void> {
+    for (const item of this.items) {
+      if (item.status !== 'ready' || item.media !== 'image') continue;
+      await this.rerender(item);
+    }
+  }
+
+  private async rerender(item: Item): Promise<void> {
+    item.status = 'cleaning';
+    this.updateCard(item);
+    try {
+      await renderImage(item, this.settings);
+      item.status = 'ready';
+    } catch (e) {
+      console.error(e);
+      item.status = 'error';
+      item.error = 'generic';
+    }
+    this.updateCard(item);
+  }
+
+  private statusText(item: Item): string {
+    const t = this.t;
+    switch (item.status) {
+      case 'queued':
+      case 'reading':
+        return t.statusReading;
+      case 'detecting':
+        return item.progress === 0 ? `${t.statusDetecting} ${t.statusLoadingModels}` : t.statusDetecting;
+      case 'cleaning':
+        return t.statusCleaning;
+      case 'ready':
+        return t.statusReady;
+      case 'error':
+        return '';
+    }
+  }
+
+  private updateCard(item: Item): void {
+    const t = this.t;
+    const lang = this.settings.lang;
+    const card = this.cardFor(item);
+    clear(card);
+    card.dataset.status = item.status;
+
+    // Preview: always the safe copy once it exists, so the user checks exactly what will be sent.
+    let preview: HTMLElement;
+    if (item.output && item.media === 'image') {
+      preview = h('img', { src: item.output.url, alt: t.statusReady, className: 'preview', 'data-testid': 'output-image' });
+    } else if (item.output && item.media === 'video') {
+      preview = h('video', { src: item.output.url, controls: true, playsinline: true, preload: 'metadata', className: 'preview' });
+    } else {
+      preview = h('div', { className: 'preview placeholder' }, item.status === 'error' ? icon(ICONS.alert, 32) : h('div', { className: 'spinner' }));
+    }
+    card.appendChild(preview);
+
+    const body = h('div', { className: 'card-body' });
+    card.appendChild(body);
+
+    if (item.status === 'error') {
+      const msg = {
+        unsupported: t.errUnsupported,
+        tooLarge: t.errTooLarge,
+        leftovers: t.errLeftovers,
+        video: t.errVideo,
+        generic: t.errGeneric,
+      }[item.error ?? 'generic'];
+      body.appendChild(h('p', { className: 'error', role: 'alert', 'data-testid': 'item-error' }, msg));
+    } else {
+      const n = item.progress !== undefined && item.status !== 'ready' ? Math.round(item.progress * 100) : undefined;
+      const pct = n === undefined ? '' : ` ${formatNumber(lang, n)}${lang === 'fa' ? '٪' : '%'}`;
+      body.appendChild(
+        h('p', { className: `status ${item.status}`, 'data-testid': 'item-status' }, item.status === 'ready' ? icon(ICONS.check, 18) : null, this.statusText(item) + pct),
+      );
+    }
+
+    if (item.status === 'ready' && item.output) {
+      if (item.media === 'image') {
+        const faces = item.detections.filter((d, i) => d.kind === 'face' && this.settings.faces && !item.removed.has(i)).length;
+        const plates = item.detections.filter((d, i) => d.kind === 'plate' && this.settings.plates && !item.removed.has(i)).length;
+        body.appendChild(h('p', { className: 'masks', 'data-testid': 'mask-summary' }, t.masksSummary(faces, plates, item.manual.length)));
+        if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
+        body.appendChild(h('p', { className: 'note' }, t.checkPicture));
+      } else {
+        body.appendChild(h('p', { className: 'warn' }, t.videoNoMasks));
+        if (item.droppedTracks > 0) body.appendChild(h('p', { className: 'note' }, t.videoDropped(item.droppedTracks)));
+      }
+      body.appendChild(this.actions(item));
+    }
+
+    if (item.findings.length || item.status === 'ready') body.appendChild(this.findingsView(item));
+
+    if (item.status === 'ready' || item.status === 'error') {
+      const rm = h('button', { type: 'button', className: 'link' }, t.remove);
+      rm.addEventListener('click', () => this.removeItem(item));
+      body.appendChild(rm);
+    }
+    this.updateBulk();
+  }
+
+  private actions(item: Item): HTMLElement {
+    const t = this.t;
+    const out = item.output!;
+    const file = () => new File([out.blob], out.name, { type: out.blob.type, lastModified: Date.now() });
+    const row = h('div', { className: 'actions' });
+    if (canShareFiles([file()])) {
+      const share = h('button', { type: 'button', className: 'btn primary', 'data-testid': 'share' }, icon(ICONS.share), t.share);
+      share.addEventListener('click', () => void shareOrSave([file()]));
+      row.appendChild(share);
+    }
+    const save = h('a', { className: 'btn', href: out.url, download: out.name, 'data-testid': 'save' }, icon(ICONS.save), t.save);
+    row.appendChild(save);
+    if (item.media === 'image' && item.decoded) {
+      const edit = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'edit' }, icon(ICONS.edit), t.editMasks);
+      edit.addEventListener('click', async () => {
+        if (await openEditor(item, this.settings, t)) await this.rerender(item);
+      });
+      row.appendChild(edit);
+    }
+    return row;
+  }
+
+  private findingsView(item: Item): HTMLElement {
+    const t = this.t;
+    const lang = this.settings.lang;
+    const box = h('div', { className: 'findings', 'data-testid': 'findings' });
+    if (!item.findings.length) {
+      box.appendChild(h('p', { className: 'note' }, t.revealedNone));
+      return box;
+    }
+    box.appendChild(h('p', { className: 'findings-title' }, t.revealedTitle));
+    const order = { high: 0, medium: 1, low: 2 } as const;
+    const sorted = [...item.findings].sort((a, b) => order[a.severity] - order[b.severity]);
+    const list = h('ul', {});
+    for (const f of sorted) list.appendChild(this.findingRow(f, lang));
+    box.appendChild(list);
+    if (item.partial) box.appendChild(h('p', { className: 'note' }, t.partialNote));
+    if (item.status === 'ready') box.appendChild(h('p', { className: 'removed' }, icon(ICONS.check, 16), t.removedNote));
+    return box;
+  }
+
+  private findingRow(f: Finding, lang: Lang): HTMLElement {
+    const t = this.t;
+    const li = h('li', { className: `sev-${f.severity}`, 'data-finding': f.id }, h('span', { className: 'label' }, t.findings[f.id]));
+    if (f.geo) {
+      const coords = `${f.geo.lat.toFixed(5)}, ${f.geo.lon.toFixed(5)}`;
+      const near = this.places ? nearest(this.places, f.geo.lat, f.geo.lon) : undefined;
+      li.appendChild(h('span', { className: 'value', dir: 'ltr' }, coords));
+      if (near) {
+        const place = `${near.name}${lang === 'fa' ? '، ' : ', '}${countryName(lang, near.country)}`;
+        li.appendChild(h('span', { className: 'value place' }, t.nearPlace(place, formatNumber(lang, Math.max(1, Math.round(near.km))))));
+      }
+    } else if (f.value) {
+      li.appendChild(h('span', { className: 'value', dir: 'auto' }, f.value));
+    }
+    return li;
+  }
+
+  private removeItem(item: Item): void {
+    const i = this.items.indexOf(item);
+    if (i >= 0) this.items.splice(i, 1);
+    if (item.output) URL.revokeObjectURL(item.output.url);
+    if (item.decoded) URL.revokeObjectURL(item.decoded.url);
+    this.cards.get(item.id)?.remove();
+    this.cards.delete(item.id);
+    this.updateBulk();
+  }
+
+  private updateBulk(): void {
+    if (!this.bulkEl) return;
+    clear(this.bulkEl);
+    const ready = this.items.filter((i) => i.status === 'ready' && i.output);
+    if (ready.length < 2) return;
+    const files = ready.map((i) => new File([i.output!.blob], i.output!.name, { type: i.output!.blob.type }));
+    if (!canShareFiles(files)) return;
+    const btn = h('button', { type: 'button', className: 'btn primary wide', 'data-testid': 'share-all' }, icon(ICONS.share), `${this.t.shareAll} (${formatNumber(this.settings.lang, ready.length)})`);
+    btn.addEventListener('click', () => void shareOrSave(files));
+    this.bulkEl.appendChild(btn);
+  }
+}
+
+function canShareFiles(files: File[]): boolean {
+  try {
+    return typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && navigator.canShare({ files });
+  } catch {
+    return false;
+  }
+}
+
+async function shareOrSave(files: File[]): Promise<void> {
+  try {
+    await navigator.share({ files });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return; // the user closed the share sheet
+    // Sharing not allowed here (for example the click was too long ago): fall back to saving.
+    for (const f of files) {
+      const url = URL.createObjectURL(f);
+      const a = h('a', { href: url, download: f.name });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
+  }
+}

@@ -61,9 +61,11 @@ scope.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     base = msg.base;
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.proxy = false;
-    ort.env.wasm.wasmPaths = { wasm: new URL('ort/ort-wasm-simd-threaded.wasm', base).href };
+    // The runtime's .wasm file is bundled next to this worker by the build and loaded from this site.
     ort.env.logLevel = 'error';
     scope.postMessage({ type: 'ready' } satisfies WorkerResponse);
+    // Start loading both models now; the first photo then does not wait for them.
+    for (const m of ['face', 'plate'] as const) session(m).catch(() => undefined);
     return;
   }
   try {
