@@ -1,4 +1,5 @@
 import { Detector } from '../lib/detect/detector';
+import { minutesLeft, secondsLeft } from '../lib/eta';
 import type { Rect } from '../lib/detect/geometry';
 import type { Finding } from '../lib/findings';
 import { loadPlaces, nearest, type Place } from '../lib/places';
@@ -488,9 +489,14 @@ export class App {
     } else {
       const n = item.progress !== undefined && item.status !== 'ready' ? Math.round(item.progress * 100) : undefined;
       const pct = n === undefined ? '' : ` ${formatNumber(lang, n)}${lang === 'fa' ? '٪' : '%'}`;
+      const left = item.progress !== undefined && item.status !== 'ready' ? secondsLeft(item.clock, item.progress, Date.now()) : undefined;
       body.appendChild(
         h('p', { className: `status ${item.status}`, 'data-testid': 'item-status' }, item.status === 'ready' ? icon(ICONS.check, 18) : null, this.statusText(item) + pct),
       );
+      if (left !== undefined) {
+        const m = minutesLeft(left);
+        body.appendChild(h('p', { className: 'note eta', 'data-testid': 'time-left' }, m === 0 ? t.etaSoon : t.etaMinutes(formatNumber(lang, m))));
+      }
       if (item.abort) {
         const cancel = h('button', { type: 'button', className: 'btn ghost small', 'data-testid': 'cancel' }, t.cancel);
         cancel.addEventListener('click', () => item.abort?.abort());

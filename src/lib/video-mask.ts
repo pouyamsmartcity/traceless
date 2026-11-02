@@ -24,6 +24,8 @@ import { VideoCleanError } from './video-errors';
 const SAMPLE_STEP = 1 / 3;
 /** Above this length (seconds) the re-encoded video uses medium instead of high quality. */
 const LONG_VIDEO_SECONDS = 180;
+/** Above this many people in a sampled frame, people get plain covers instead of outlines. */
+const MAX_OUTLINED_PEOPLE = 8;
 /** Longest side of the frames the detectors look at. */
 const DETECT_SIDE = 1280;
 
@@ -107,6 +109,10 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
           opts.faces || opts.plates || opts.people
             ? await detector.detect(frame, cw, ch, { faces: opts.faces, plates: opts.plates, people: opts.people ?? false, quick: true })
             : [];
+        // Outline people so their covers follow the body; in a crowd plain boxes are used (much faster).
+        if (opts.people && found.filter((d) => d.kind === 'person').length <= MAX_OUTLINED_PEOPLE) {
+          await detector.outlinePeople(frame, found).catch((e: unknown) => console.warn('people outlines unavailable', e));
+        }
         if (opts.text) found = found.concat(await detector.detectText(frame, cw, ch, undefined, true));
       } catch (e) {
         throw new VideoCleanError('cannotMask', `detection failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -115,7 +121,8 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       const fctx = (wrapped.canvas as HTMLCanvasElement | OffscreenCanvas).getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
       const colors = fctx && (opts.style ?? 'smart') === 'smart' ? sampleColors(fctx, found, 1, cw, ch) : [];
       const boxes = found.map((d, k) => {
-        const b: TimedBoxes['boxes'][number] = { x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale, shape: d.kind === 'face' ? 'ellipse' : 'rounded' };
+        const b: TimedBoxes['boxes'][number] = { x: d.x / scale, y: d.y / scale, w: d.w / scale, h: d.h / scale, shape: d.kind === 'face' ? 'ellipse' : d.silhouette ? 'silhouette' : 'rounded' };
+        if (d.silhouette) b.silhouette = d.silhouette;
         if (colors[k]) b.color = colors[k];
         return b;
       });

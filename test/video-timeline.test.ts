@@ -96,3 +96,46 @@ describe('video timeline', () => {
     expect(m.map((c) => c.shape).sort()).toEqual(['ellipse', 'rounded']);
   });
 });
+
+describe('person outlines in videos', () => {
+  const N = 160;
+  const outline = (x0: number, x1: number) => {
+    const data = new Uint8Array(N * N);
+    for (let y = 20; y < 140; y++) for (let x = x0; x < x1; x++) data[y * N + x] = 1;
+    return { w: N, h: N, data };
+  };
+
+  it('blends the outlines of both neighbouring samples and grows them', async () => {
+    const { blendSilhouettes } = await import('../src/lib/video-timeline');
+    const s = blendSilhouettes(outline(10, 30), outline(100, 120), 4);
+    const on = (x: number, y: number) => s.data[y * N + x] === 1;
+    expect(on(20, 80) && on(110, 80)).toBe(true); // both poses
+    expect(on(6, 80) && on(123, 80) && on(20, 16)).toBe(true); // grown
+    expect(on(60, 80) || on(3, 80) || on(20, 10)).toBe(false); // but not filled in between
+  });
+
+  it('keeps one outlined cover per person, falling back to a box without outlines', () => {
+    const box = (t: number, sil: boolean): TimedBoxes => ({
+      t,
+      boxes: [{ x: 100 + t * 30, y: 100, w: 200, h: 500, shape: sil ? 'silhouette' : 'rounded', ...(sil ? { silhouette: outline(40, 120) } : {}) }],
+    });
+    const samples = [box(0, true), box(1 / 3, true), box(2 / 3, false), box(1, true)];
+    const m1 = masksAt(samples, 0.15, 1920, 1080);
+    expect(m1).toHaveLength(1);
+    expect(m1[0]!.shape).toBe('silhouette');
+    expect(m1[0]!.silhouette).toBeDefined();
+    const m2 = masksAt(samples, 0.5, 1920, 1080);
+    expect(m2).toHaveLength(1);
+    expect(m2[0]!.shape).toBe('rounded');
+  });
+
+  it('does not squeeze an outline at the frame edge', () => {
+    const samples: TimedBoxes[] = [
+      { t: 0, boxes: [{ x: -5, y: 100, w: 200, h: 500, shape: 'silhouette', silhouette: outline(0, 160) }] },
+      { t: 1 / 3, boxes: [{ x: -5, y: 100, w: 200, h: 500, shape: 'silhouette', silhouette: outline(0, 160) }] },
+    ];
+    const [c] = masksAt(samples, 0.1, 1920, 1080);
+    expect(c!.x).toBeLessThan(-5);
+    expect(c!.w).toBeGreaterThan(200);
+  });
+});

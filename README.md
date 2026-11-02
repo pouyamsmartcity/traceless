@@ -16,7 +16,7 @@ which device a picture was taken, and covers faces and licence plates with solid
   silhouette (found by a segmentation network) when whole people are covered. Three looks: "smart" (a colour taken
   from around the cover, so it sits naturally in the picture), black, and Pakkon's green with its eraser mark. You can add or remove covers by hand. In videos, every frame is covered, following moving people.
 - **Whole people covered on request** (body, clothes, hair), for when clothes or hair could identify someone
-  (YOLOX-nano person detection, Apache-2.0).
+  (YOLOX-s person detection, Apache-2.0). In videos the silhouette follows each person between sampled frames.
 - **Text covered on request.** Street and shop signs, names and numbers (Persian and Latin script) can be covered
   too; tap a cover to keep a piece of text visible.
 - **Extra protection on request.** Makes it much harder to link a photo to a camera through its sensor's noise
@@ -87,10 +87,11 @@ file ──► inspect (what does it reveal?) ──► decode pixels ──► 
   [exifr](https://github.com/MikeKovarik/exifr) for EXIF/IPTC values.
 - Detection: [ONNX Runtime Web](https://onnxruntime.ai/) running
   [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) (faces) and a YOLOv9-t plate
-  model from [open-image-models](https://github.com/ankandrew/open-image-models). See
+  model from [open-image-models](https://github.com/ankandrew/open-image-models); optional text (PaddleOCR),
+  people (YOLOX-s) and outline (U-2-Net) models. See
   [`public/models/README.md`](public/models/README.md) for sources, licences and checksums.
 - Video: [Mediabunny](https://mediabunny.dev/) re-packages the file; our own reader checks the result.
-- Offline: a service worker stores the whole app (about 25 MB, once).
+- Offline: a service worker stores the whole app (about 48 MB, once; most of it is the detection models and runtime).
 
 ## Development
 

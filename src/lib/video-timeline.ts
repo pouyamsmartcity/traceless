@@ -1,5 +1,5 @@
 import { expand, iou, type Rect } from './detect/geometry';
-import type { Cover } from './masks';
+import type { Cover, Silhouette } from './masks';
 
 /**
  * Faces and plates found in sampled video frames, and the masks to paint on every frame.
@@ -14,7 +14,7 @@ export interface TimedBoxes {
   /** Time of the sampled frame, in seconds. */
   t: number;
   /** Covers in display pixels of the full-size frame (shape kept: faces are ellipses). */
-  boxes: (Rect & { shape?: Cover['shape']; color?: Cover['color'] })[];
+  boxes: (Rect & { shape?: Cover['shape']; color?: Cover['color']; silhouette?: Silhouette })[];
 }
 
 function center(r: Rect): { x: number; y: number } {
@@ -74,6 +74,69 @@ interface Track {
   points: { t: number; box: TBox }[];
 }
 
+/** Faces link only to faces; a person outlined in one sample and boxed in the next is still one person. */
+function family(b: TBox): 'ellipse' | 'other' {
+  return b.shape === 'ellipse' ? 'ellipse' : 'other';
+}
+
+/**
+ * Silhouette cells added around a person's outline in videos: between two samples arms and legs move,
+ * so the outline used is the union of both neighbouring outlines, grown by this many cells (of 160).
+ */
+export const SILHOUETTE_GROW = 8;
+
+/** Union of two silhouettes of the same size (each relative to its own box), grown by `grow` cells. */
+export function blendSilhouettes(a: Silhouette, b: Silhouette, grow: number): Silhouette {
+  if (a.w !== b.w || a.h !== b.h) throw new Error('silhouette sizes differ');
+  const { w, h } = a;
+  const both = new Uint8Array(w * h);
+  for (let i = 0; i < both.length; i++) both[i] = a.data[i] || b.data[i] ? 1 : 0;
+  return { w, h, data: grow > 0 ? dilate(both, w, h, grow) : both };
+}
+
+/** Grows the marked cells by r in every direction (square neighbourhood, two separable passes). */
+function dilate(src: Uint8Array, w: number, h: number, r: number): Uint8Array {
+  const row = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let last = -Infinity;
+    // Left to right, then right to left: a cell is on if a marked cell is within r along the row.
+    for (let x = 0; x < w; x++) {
+      if (src[y * w + x]) last = x;
+      if (x - last <= r) row[y * w + x] = 1;
+    }
+    last = Infinity;
+    for (let x = w - 1; x >= 0; x--) {
+      if (src[y * w + x]) last = x;
+      if (last - x <= r) row[y * w + x] = 1;
+    }
+  }
+  const out = new Uint8Array(w * h);
+  for (let x = 0; x < w; x++) {
+    let last = -Infinity;
+    for (let y = 0; y < h; y++) {
+      if (row[y * w + x]) last = y;
+      if (y - last <= r) out[y * w + x] = 1;
+    }
+    last = Infinity;
+    for (let y = h - 1; y >= 0; y--) {
+      if (row[y * w + x]) last = y;
+      if (last - y <= r) out[y * w + x] = 1;
+    }
+  }
+  return out;
+}
+
+/** Blended outlines are reused for every frame between the same two samples. */
+const blendCache = new WeakMap<Silhouette, WeakMap<Silhouette, Silhouette>>();
+
+function blendedOutline(a: Silhouette, b: Silhouette): Silhouette {
+  let inner = blendCache.get(a);
+  if (!inner) blendCache.set(a, (inner = new WeakMap()));
+  let s = inner.get(b);
+  if (!s) inner.set(b, (s = blendSilhouettes(a, b, SILHOUETTE_GROW)));
+  return s;
+}
+
 /** Up to this many samples in a row may miss an object before its track ends. */
 const MAX_GAP = 2;
 
@@ -94,7 +157,7 @@ export function buildTracks(samples: TimedBoxes[]): Track[] {
       const fresh = [...unmatched].map((j) => sample.boxes[j]!);
       // A fast face can move a few of its own widths between samples (more across missed samples).
       for (const [a, b] of matchBoxes(lastBoxes, fresh, 4 * gap)) {
-        if ((a.shape ?? 'rounded') !== (b.shape ?? 'rounded')) continue;
+        if (family(a) !== family(b)) continue;
         const ti = candidates[lastBoxes.indexOf(a)]!;
         const bj = sample.boxes.indexOf(b);
         if (!unmatched.has(bj)) continue;
@@ -170,7 +233,16 @@ export function masksAt(samples: TimedBoxes[], t: number, w: number, h: number):
       p.length === 1
         ? 0.35
         : Math.min(0.6, 0.06 + (speed * (step * 0.15 + 0.5 * Math.min(away, hold))) / size);
-    const c: Cover = { ...expand(box, margin, margin, w, h), shape: a.box.shape ?? 'rounded' };
+    const c: Cover = { ...expand(box, margin, margin, w, h), shape: a.box.shape === 'ellipse' ? 'ellipse' : 'rounded' };
+    // A person keeps their outline only while both neighbouring samples have one; otherwise the whole box.
+    const sa = a.box.silhouette;
+    const sb = b.box.silhouette;
+    if (a.box.shape === 'silhouette' && sa && sb && sa.w === sb.w && sa.h === sb.h) {
+      // Not clamped to the frame: the outline is drawn relative to the whole (grown) box.
+      Object.assign(c, { x: box.x - box.w * margin, y: box.y - box.h * margin, w: box.w * (1 + 2 * margin), h: box.h * (1 + 2 * margin) });
+      c.shape = 'silhouette';
+      c.silhouette = blendedOutline(sa, sb);
+    }
     if (a.box.color) c.color = a.box.color;
     out.push(c);
   }

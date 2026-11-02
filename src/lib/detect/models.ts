@@ -29,8 +29,9 @@ export const MODELS: Record<ModelId, ModelSpec> = {
   face: { id: 'face', file: 'models/face-yunet-2023mar.onnx', inputName: 'input', size: 640, pad: 0, pixels: 'bgr255', threshold: 0.5 },
   // YOLOv9-t licence plate detector (open-image-models, MIT). 640x640 input, RGB 0..1, NMS built in.
   plate: { id: 'plate', file: 'models/plate-yolov9t-640.onnx', inputName: 'images', size: 640, pad: 114, pixels: 'rgb01', threshold: 0.3 },
-  // YOLOX-nano (Megvii, Apache-2.0), COCO classes; we use "person". 416x416 input, BGR 0..255.
-  person: { id: 'person', file: 'models/person-yolox-nano.onnx', inputName: 'images', size: 416, pad: 114, pixels: 'bgr255', threshold: 0.35 },
+  // YOLOX-s (Megvii, Apache-2.0), COCO classes; we use "person". 640x640 input, BGR 0..255. Weights stored as
+  // float16 (scripts/half_weights.py), computed in float32. Far better than YOLOX-nano on small, partly hidden people.
+  person: { id: 'person', file: 'models/person-yolox-s.onnx', inputName: 'images', size: 640, pad: 114, pixels: 'bgr255', threshold: 0.35 },
   // U-2-Net small (Apache-2.0): outlines the main subject of a crop; used to draw a person's silhouette.
   seg: { id: 'seg', file: 'models/person-seg-u2netp.onnx', inputName: 'input.1', size: 320, pad: 0, pixels: 'rgbImagenet', threshold: 0.43 },
   // PaddleOCR PP-OCRv3 text detection (Apache-2.0). Any size that is a multiple of 32. Outputs a text probability map.

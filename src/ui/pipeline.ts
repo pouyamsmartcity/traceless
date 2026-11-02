@@ -7,6 +7,7 @@ import type { Detection, Rect } from '../lib/detect/geometry';
 import type { Cover, MaskStyle } from '../lib/masks';
 import type { Finding } from '../lib/findings';
 import { inspectImage, sniffImage, type Hint } from '../lib/inspect-image';
+import { tick, type PhaseClock } from '../lib/eta';
 
 export type ItemStatus = 'queued' | 'reading' | 'detecting' | 'cleaning' | 'ready' | 'error';
 export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'videoMask' | 'voice' | 'cancelled' | 'generic';
@@ -17,6 +18,8 @@ export interface Item {
   media: 'image' | 'video';
   status: ItemStatus;
   progress?: number;
+  /** Times the current long step, for the "time left" note. */
+  clock?: PhaseClock;
   findings: Finding[];
   /** Signs that the received photo was edited or re-saved (hints, not proof). */
   hints: Hint[];
@@ -296,8 +299,13 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
   const opts: Options = { ...liveOpts };
   const set = (status: ItemStatus, progress?: number) => {
     item.status = status;
-    if (progress === undefined) delete item.progress;
-    else item.progress = progress;
+    if (progress === undefined) {
+      delete item.progress;
+      delete item.clock;
+    } else {
+      item.progress = progress;
+      item.clock = tick(item.clock, status, progress, Date.now());
+    }
     update();
   };
   try {
