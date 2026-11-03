@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'n
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
-import { DEFAULT_SITE_URL, PAGE_PATH, renderPage, sitemap } from './src/seo/pages.ts';
+import { DEFAULT_SITE_URL, PAGE_PATH, notFoundPage, renderPage, sitemap } from './src/seo/pages.ts';
 import { LANGS } from './src/ui/i18n.ts';
 // @ts-expect-error plain JavaScript build helper (no type declarations)
 import { MODELS_NOTE, writeNotices } from './scripts/notices.mjs';
@@ -19,9 +19,9 @@ const SITE_URL = (() => {
 })();
 
 /** Files on the site that the app itself never needs, so the offline copy does not download them. */
-const NOT_OFFLINE = /^(og-[a-z]+\.jpg|sitemap\.xml|robots\.txt|google[0-9a-f]+\.html|SHA256SUMS\.txt)$/;
+const NOT_OFFLINE = /^(og-[a-z]+\.jpg|sitemap\.xml|404\.html|robots\.txt|google[0-9a-f]+\.html|SHA256SUMS\.txt)$/;
 
-/** Writes the English, Persian and Turkish pages (/, /fa/, /tr/) and the sitemap from the built index.html. */
+/** Writes the English, Persian and Turkish pages (/, /fa/, /tr/), the sitemap and 404.html from the built index.html. */
 function languagePages(dist: string): void {
   const built = readFileSync(join(dist, 'index.html'), 'utf8');
   for (const lang of LANGS) {
@@ -30,6 +30,7 @@ function languagePages(dist: string): void {
     writeFileSync(file, renderPage(built, lang, SITE_URL));
   }
   writeFileSync(join(dist, 'sitemap.xml'), sitemap(SITE_URL));
+  writeFileSync(join(dist, '404.html'), notFoundPage(SITE_URL));
 }
 
 /**

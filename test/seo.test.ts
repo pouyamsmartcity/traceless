@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { PAGE_PATH, PAGE_TEXT, renderPage, sitemap } from '../src/seo/pages';
+import { PAGE_PATH, PAGE_TEXT, notFoundPage, renderPage, sitemap } from '../src/seo/pages';
 import { LANGS, STRINGS } from '../src/ui/i18n';
 
 const SITE = 'https://example.github.io/traceless/';
@@ -87,6 +87,14 @@ describe('language pages', () => {
         expect(around, lang).toMatch(/no tool|هیچ ابزاری|hiçbir araç/i);
       }
     }
+  });
+
+  it('has a "not found" page that links home in every language, loads nothing and is not listed', () => {
+    const html = notFoundPage(SITE);
+    for (const lang of LANGS) expect(html).toContain(`href="${SITE + PAGE_PATH[lang]}"`);
+    expect(html).toContain('<meta name="robots" content="noindex" />');
+    expect(html).toContain("default-src 'none'");
+    expect(html).not.toMatch(/<(script|link|img|style)\b/);
   });
 
   it('lists every language page in the sitemap, with its alternates', () => {

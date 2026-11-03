@@ -248,3 +248,36 @@ export function sitemap(site: string = DEFAULT_SITE_URL): string {
   const urls = LANGS.map((l) => `  <url>\n    <loc>${esc(pageUrl(site, l))}</loc>\n${links}\n  </url>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls}\n</urlset>\n`;
 }
+
+const NOT_FOUND: Record<Lang, { title: string; text: string; link: string }> = {
+  en: { title: 'Page not found', text: 'There is nothing at this address.', link: 'Open Traceless' },
+  fa: { title: 'این صفحه پیدا نشد', text: 'در این نشانی چیزی نیست.', link: 'باز کردن Traceless' },
+  tr: { title: 'Sayfa bulunamadı', text: 'Bu adreste bir şey yok.', link: 'Traceless’i aç' },
+};
+
+/**
+ * 404.html for the host (GitHub Pages shows it at any missing address, so its links are absolute). It loads
+ * nothing at all, not even a style sheet, and asks search engines not to list it.
+ */
+export function notFoundPage(site: string = DEFAULT_SITE_URL): string {
+  const parts = LANGS.map((l) => {
+    const t = NOT_FOUND[l];
+    return `<section lang="${l}" dir="${isRtl(l) ? 'rtl' : 'ltr'}"><h2>${esc(t.title)}</h2><p>${esc(t.text)} <a href="${esc(pageUrl(site, l))}" hreflang="${l}">${esc(t.link)}</a></p></section>`;
+  });
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex" />
+    <title>Traceless · ${esc(NOT_FOUND.en.title)}</title>
+  </head>
+  <body>
+    <h1>Traceless</h1>
+    ${parts.join('\n    ')}
+  </body>
+</html>
+`;
+}

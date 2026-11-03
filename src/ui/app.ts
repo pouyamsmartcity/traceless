@@ -329,7 +329,7 @@ export class App {
     // Each language is named in itself, so someone who cannot read the current one still finds theirs.
     const langSelect = h(
       'select',
-      { className: 'lang-select', 'aria-label': `${t.langSwitch} · Language`, title: t.langSwitch, 'data-testid': 'lang' },
+      { className: 'lang-select', 'aria-label': t.langSwitch === 'Language' ? t.langSwitch : `${t.langSwitch} · Language`, title: t.langSwitch, 'data-testid': 'lang' },
       ...LANGS.map((l) => h('option', { value: l, lang: l, selected: l === this.settings.lang }, LANG_NAMES[l])),
     );
     const langBtn = h('label', { className: 'icon-btn lang-picker' }, icon(ICONS.globe, 20), h('span', { className: 'lang-code', 'aria-hidden': 'true' }, this.settings.lang.toUpperCase()), langSelect);
