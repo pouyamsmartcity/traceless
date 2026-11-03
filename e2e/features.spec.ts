@@ -412,6 +412,42 @@ test.describe('Pakkon: new features', () => {
     expect(info.spread).toBeLessThan(6);
   });
 
+  test('files with Persian names work, and the name never reaches the safe copy', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles({ name: 'عکس تظاهرات میدان.png', mimeType: 'image/png', buffer: readFileSync(fixture('real/astronaut.png')) });
+    const item = await readyItem(page);
+    await expect(page.getByTestId('announcer')).toContainText('عکس تظاهرات میدان.png');
+    await expect(item.getByTestId('save')).toHaveAttribute('download', /^img-[a-z0-9]+\.png$/);
+  });
+
+  test('a picture bomb (tiny file, gigantic picture) is refused before it is decoded', async ({ page }) => {
+    await page.goto('/');
+    const png = Buffer.from(readFileSync(fixture('real/astronaut.png')));
+    png.writeUInt32BE(30000, 16);
+    png.writeUInt32BE(30000, 20);
+    await page.getByTestId('file-input').setInputFiles({ name: 'bomb.png', mimeType: 'image/png', buffer: png });
+    await expect(page.getByTestId('item-error')).toContainText('خیلی بزرگ', { timeout: 15_000 });
+  });
+
+  test('a part of the app that can no longer load (site updated meanwhile) offers a reload instead of failing', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => window.dispatchEvent(new Event('vite:preloadError', { cancelable: true })));
+    await expect(page.getByTestId('update-bar')).toBeVisible();
+    await expect(page.getByTestId('update-reload')).toBeVisible();
+  });
+
+  test('when served offline, no other site may show the app inside a frame', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('offline-badge')).toContainText('آمادهٔ کار بدون اینترنت', { timeout: 90_000 });
+    await page.reload();
+    const headers = await page.evaluate(async () => {
+      const r = await fetch('./');
+      return { csp: r.headers.get('content-security-policy'), xfo: r.headers.get('x-frame-options') };
+    });
+    expect(headers.csp).toContain("frame-ancestors 'none'");
+    expect(headers.xfo).toBe('DENY');
+  });
+
   test('wipe: one tap forgets every file and copy', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));

@@ -1,4 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { openAsBlob } from 'node:fs';
+import { stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { check, clean, inspect } from './core';
@@ -61,6 +62,20 @@ export const TOOLS = [
 
 type Json = Record<string, unknown>;
 
+/** Largest file the tools read (the app's limit too). */
+export const MAX_INPUT_BYTES = 2 * 1024 ** 3;
+
+/**
+ * Reads a regular file of at most MAX_INPUT_BYTES. Devices, pipes and folders are refused before reading, so a
+ * path like /dev/zero cannot fill the memory or block the server.
+ */
+export async function readInput(path: string): Promise<Uint8Array> {
+  const info = await stat(path);
+  if (!info.isFile()) throw new Error('not a regular file');
+  if (info.size > MAX_INPUT_BYTES) throw new Error('file larger than 2 GB');
+  return new Uint8Array(await (await openAsBlob(path)).arrayBuffer());
+}
+
 function randomName(ext: string): string {
   const a = new Uint8Array(6);
   crypto.getRandomValues(a);
@@ -72,7 +87,7 @@ export async function callTool(name: string, args: Json): Promise<{ content: { t
   const path = typeof args.path === 'string' ? resolve(args.path) : undefined;
   if (!path) return { content: [{ type: 'text', text: 'Missing "path".' }], isError: true };
   try {
-    const bytes = new Uint8Array(await readFile(path));
+    const bytes = await readInput(path);
     if (name === 'inspect_file') {
       const r = await inspect(bytes);
       const lines = r.leaks.length ? r.leaks.map((l) => `- [${l.severity}] ${l.label}${l.value ? `: ${l.value}` : ''}`) : ['- nothing found'];
@@ -103,12 +118,19 @@ export async function callTool(name: string, args: Json): Promise<{ content: { t
 }
 
 /** Answers one JSON-RPC message; returns the response, or undefined for notifications. */
-export async function handle(msg: Json): Promise<Json | undefined> {
-  const id = msg.id as string | number | undefined;
+export async function handle(raw: unknown): Promise<Json | undefined> {
+  // Anything that is not a single JSON-RPC object (null, numbers, arrays: batches are not part of MCP) is refused.
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request' } };
+  const msg = raw as Json;
+  const validId = typeof msg.id === 'string' || (typeof msg.id === 'number' && Number.isFinite(msg.id));
+  const id = validId ? (msg.id as string | number) : undefined;
   const method = msg.method as string | undefined;
   const reply = (result: unknown) => ({ jsonrpc: '2.0', id, result });
   const fail = (code: number, message: string) => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
-  if (msg.jsonrpc !== '2.0' || typeof method !== 'string') return id === undefined ? undefined : fail(-32600, 'Invalid request');
+  // Responses to requests we never send (no "method", but a result or error) need no answer.
+  if (method === undefined && ('result' in msg || 'error' in msg)) return undefined;
+  if (msg.jsonrpc !== '2.0' || typeof method !== 'string') return 'id' in msg ? fail(-32600, 'Invalid request') : undefined;
+  if ('id' in msg && !validId) return fail(-32600, 'Invalid request id');
   if (id === undefined) return undefined; // notifications (initialized, cancelled...) need no answer
   switch (method) {
     case 'initialize':
@@ -136,20 +158,31 @@ export async function handle(msg: Json): Promise<Json | undefined> {
 /** Serves MCP on stdin/stdout until stdin closes. Logs go to stderr only (stdout carries the protocol). */
 export function serve(): void {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  let chain = Promise.resolve();
+  const send = (res: Json) => process.stdout.write(`${JSON.stringify(res)}\n`);
+  // Tool calls run one at a time (they can use a lot of memory); everything else is answered at once, so a long
+  // call never blocks ping or initialize.
+  let tools = Promise.resolve();
   rl.on('line', (line) => {
     if (!line.trim()) return;
-    chain = chain.then(async () => {
-      let msg: Json;
-      try {
-        msg = JSON.parse(line) as Json;
-      } catch {
-        process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } })}\n`);
-        return;
-      }
-      const res = await handle(msg).catch((e: unknown) => ({ jsonrpc: '2.0', id: msg.id ?? null, error: { code: -32603, message: e instanceof Error ? e.message : String(e) } }));
-      if (res) process.stdout.write(`${JSON.stringify(res)}\n`);
-    });
+    let msg: unknown;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+      return;
+    }
+    const run = (): Promise<void> =>
+      handle(msg)
+        .then((res) => {
+          if (res) send(res);
+        })
+        .catch((e: unknown) => {
+          const id = typeof msg === 'object' && msg !== null && !Array.isArray(msg) ? ((msg as Json).id ?? null) : null;
+          send({ jsonrpc: '2.0', id: typeof id === 'string' || typeof id === 'number' ? id : null, error: { code: -32603, message: e instanceof Error ? e.message : String(e) } });
+        });
+    const isTool = typeof msg === 'object' && msg !== null && (msg as Json).method === 'tools/call';
+    if (isTool) tools = tools.then(run);
+    else void run();
   });
   process.stderr.write('pakkon MCP server ready (stdio, offline)\n');
 }

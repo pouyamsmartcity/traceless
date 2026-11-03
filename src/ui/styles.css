@@ -1603,3 +1603,23 @@ input.masked {
   font-variant-numeric: tabular-nums;
   text-align: end;
 }
+
+/* ---------- New version bar ---------- */
+
+.update-bar {
+  position: sticky;
+  top: 64px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--brand-soft);
+  box-shadow: var(--shadow);
+  font-size: 0.9rem;
+  font-weight: 700;
+  animation: rise 0.3s var(--ease) both;
+}

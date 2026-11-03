@@ -120,3 +120,50 @@ describe('MCP server', () => {
     expect(r.content[0]!.text).toMatch(/Error/);
   });
 });
+
+describe('hardening (production review)', () => {
+  it('answers malformed MCP messages without crashing', async () => {
+    expect(await handle(null)).toMatchObject({ error: { code: -32600 }, id: null });
+    expect(await handle([{ jsonrpc: '2.0', id: 1, method: 'ping' }])).toMatchObject({ error: { code: -32600 } });
+    expect(await handle(42)).toMatchObject({ error: { code: -32600 } });
+    // A response sent to us, or a notification, needs no answer.
+    expect(await handle({ jsonrpc: '2.0', id: 5, result: {} })).toBeUndefined();
+    expect(await handle({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 3 } })).toBeUndefined();
+    expect(await handle({ jsonrpc: '2.0', id: { a: 1 }, method: 'ping' })).toMatchObject({ error: { code: -32600 }, id: null });
+    expect(await handle({ jsonrpc: '2.0', id: 'x', method: 'ping' })).toMatchObject({ id: 'x', result: {} });
+  });
+
+  it('refuses devices, folders and pipes instead of reading them', async () => {
+    const { readInput } = await import('../src/cli/mcp');
+    await expect(readInput('/dev/zero')).rejects.toThrow(/regular file/);
+    await expect(readInput(tmpdir())).rejects.toThrow(/regular file/);
+    expect((await callTool('inspect_file', { path: '/dev/zero' })).isError).toBe(true);
+  });
+
+  it('refuses a picture bomb from its header, before decoding', async () => {
+    // A valid-looking PNG header announcing 30000 x 30000 pixels (900 megapixels) in a few bytes.
+    const png = new Uint8Array(fx('real/astronaut.png').subarray(0, 64));
+    new DataView(png.buffer).setUint32(16, 30000);
+    new DataView(png.buffer).setUint32(20, 30000);
+    const t = Date.now();
+    expect(() => decodePixels(png)).toThrow(/too large/);
+    expect(Date.now() - t).toBeLessThan(200);
+  });
+
+  it('reads picture sizes from headers', async () => {
+    const { headerSize } = await import('../src/lib/inspect-image');
+    expect(headerSize(fx('real/astronaut.png'))).toEqual({ width: 512, height: 512 });
+    expect(headerSize(fx('leaky/photo-everything.jpg'))).toEqual({ width: 800, height: 600 });
+    const webp = headerSize(fx('leaky/photo-leaky.webp'));
+    expect(webp?.width).toBeGreaterThan(0);
+    expect(headerSize(new Uint8Array([1, 2, 3]))).toBeUndefined();
+  });
+
+  it('limits video size by the device memory', async () => {
+    const { maxMediaBytes } = await import('../src/ui/pipeline');
+    expect(maxMediaBytes(8)).toBe(Math.round((8 * 1024 ** 3) / 5));
+    expect(maxMediaBytes(16)).toBe(2 * 1024 ** 3);
+    expect(maxMediaBytes(undefined)).toBe(1024 ** 3);
+    expect(maxMediaBytes(2)).toBeLessThan(500 * 1024 ** 2);
+  });
+});

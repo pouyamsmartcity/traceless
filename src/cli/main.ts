@@ -1,7 +1,7 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { writeFile } from 'node:fs/promises';
+import { dirname, extname, join, resolve } from 'node:path';
 import { check, clean, inspect } from './core';
-import { serve, SERVER_INFO } from './mcp';
+import { readInput, serve, SERVER_INFO } from './mcp';
 
 const HELP = `Pakkon ${SERVER_INFO.version} — make photos, videos and voice notes safe to share (runs offline)
 
@@ -41,7 +41,7 @@ export async function main(argv: string[]): Promise<number> {
     return cmd ? 2 : 0;
   }
   const path = resolve(file);
-  const bytes = new Uint8Array(await readFile(path));
+  const bytes = await readInput(path);
   if (cmd === 'inspect') {
     const r = await inspect(bytes);
     const lines = r.leaks.map((l) => `  [${l.severity}] ${l.label}${l.value ? `: ${l.value}` : ''}`);
@@ -67,6 +67,8 @@ export async function main(argv: string[]): Promise<number> {
     const r = await clean(bytes, { covers, ...(color ? { color } : {}) });
     const out = resolve(arg(rest, '-o') ?? arg(rest, '--output') ?? join(dirname(path), randomName(r.ext)));
     if (out === path) throw new Error('the safe copy must not replace the original');
+    const ext = extname(out).slice(1).toLowerCase();
+    if (ext !== r.ext && !(r.ext === 'jpg' && ext === 'jpeg')) throw new Error(`the safe copy is a .${r.ext} file; choose an output name ending in .${r.ext}`);
     await writeFile(out, r.bytes, { flag: 'wx' });
     print(`Safe copy: ${out}\nRemoved: ${r.removed.map((l) => l.label).join('; ') || 'nothing was found'}\n${r.notes.join('\n')}`, { output: out, kind: r.kind, removed: r.removed, notes: r.notes });
     return 0;

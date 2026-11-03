@@ -125,6 +125,8 @@ export class App {
 
   setOfflineReady(): void {
     this.offlineReady = true;
+    // Ask the browser not to clear the offline copy when storage runs low (it matters most during a shutdown).
+    void navigator.storage?.persist?.().catch(() => false);
     // Only the badge changes (a full redraw could interrupt what the user is doing).
     const badge = this.root.querySelector('[data-testid="offline-badge"] > span');
     if (badge && !badge.querySelector('.ready')) badge.appendChild(h('span', { className: 'ready' }, ` · ${this.t.offlineReady}`));
@@ -136,6 +138,16 @@ export class App {
       sw.addEventListener('controllerchange', go, { once: true });
       setTimeout(go, 10_000);
     }
+  }
+
+  /** A new version of Pakkon is ready: a bar with a reload button (the user chooses when). */
+  showUpdateReady(): void {
+    if (this.root.querySelector('[data-testid="update-bar"]')) return;
+    const t = this.t;
+    const reload = h('button', { type: 'button', className: 'btn primary small', 'data-testid': 'update-reload' }, t.updateReload);
+    reload.addEventListener('click', () => location.reload());
+    const bar = h('div', { className: 'update-bar', role: 'status', 'data-testid': 'update-bar' }, h('span', {}, t.updateReady), reload);
+    this.root.prepend(bar);
   }
 
   /** The offline copy could not be made (private browsing, old browser): load the models straight away. */

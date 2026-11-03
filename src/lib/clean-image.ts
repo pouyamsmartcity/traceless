@@ -1,6 +1,6 @@
 import type { Rect } from './detect/geometry';
 import { paintCovers, type Cover, type MaskStyle } from './masks';
-import { inspectImage, sniffImage } from './inspect-image';
+import { headerSize, inspectImage, sniffImage } from './inspect-image';
 import { jpegProblems, stripJpeg } from './jpeg';
 import { pngProblems, stripPng } from './png';
 
@@ -9,6 +9,8 @@ import { pngProblems, stripPng } from './png';
  * Larger photos (for example 48 MP) are scaled down to stay safely below it.
  */
 export const MAX_PIXELS = 16_000_000;
+/** Largest picture decoded at all (a 108-megapixel phone photo fits; bigger is refused before decoding). */
+export const MAX_DECODE_PIXELS = 120_000_000;
 
 export class ImageCleanError extends Error {
   constructor(
@@ -30,6 +32,9 @@ export interface DecodedImage {
 
 /** Decodes an image file. The browser applies the EXIF orientation, so width/height are as displayed. */
 export async function decodeImage(file: Blob): Promise<DecodedImage> {
+  // A picture far beyond what is drawn (MAX_PIXELS) would only use up the phone's memory: refused before decoding.
+  const head = headerSize(new Uint8Array(await file.slice(0, 256 * 1024).arrayBuffer()));
+  if (head && head.width * head.height > MAX_DECODE_PIXELS) throw new ImageCleanError('tooLarge', `picture of ${head.width} x ${head.height} pixels`);
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.decoding = 'async';

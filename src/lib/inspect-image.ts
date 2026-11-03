@@ -123,6 +123,11 @@ function asDict(v: unknown): Dict | undefined {
 const EDITORS = /photoshop|lightroom|gimp|snapseed|picsart|canva|pixelmator|affinity|facetune|vsco|meitu|luminar|capture one|paint\.net|krita/i;
 
 /** EXIF date "2026:09:21 18:30:00" (or a Date) as milliseconds, or undefined. */
+/** A time as "2008-10-22 16:28:39", the way the camera wrote it (no time zone is assumed or shown). */
+function plainTime(ms: number): string {
+  return new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+}
+
 function exifTime(v: unknown): number | undefined {
   if (v instanceof Date) return isNaN(v.getTime()) ? undefined : v.getTime();
   if (typeof v !== 'string') return undefined;
@@ -162,7 +167,7 @@ async function readExif(input: Uint8Array, out: FindingList, hints: Hint[]): Pro
     const g = validGeo(gps.latitude, gps.longitude, gps.GPSAltitude);
     if (g) out.add('gps', `${g.lat.toFixed(5)}, ${g.lon.toFixed(5)}`, g);
     else if (Object.keys(gps).some((k) => k !== 'GPSVersionID')) out.add('gps');
-    if (gps.GPSDateStamp) out.add('dateTaken', `${String(gps.GPSDateStamp)} (GPS)`);
+    if (gps.GPSDateStamp) out.add('dateTaken', `${String(gps.GPSDateStamp).replace(/^(\d{4}):(\d{2}):(\d{2})$/, '$1-$2-$3')} (GPS)`);
   }
   const model = [ifd0.Make, ifd0.Model].filter(Boolean).join(' ');
   if (model) out.add('deviceModel', model);
@@ -194,7 +199,7 @@ async function readExif(input: Uint8Array, out: FindingList, hints: Hint[]): Pro
   const original = exifTime(exif.DateTimeOriginal);
   const modified = exifTime(ifd0.ModifyDate);
   if (original !== undefined && modified !== undefined && Math.abs(modified - original) > 60_000) {
-    hints.push({ id: 'dateMismatch', value: `${String(exif.DateTimeOriginal)} → ${String(ifd0.ModifyDate)}` });
+    hints.push({ id: 'dateMismatch', value: `${plainTime(original)} → ${plainTime(modified)}` });
   }
   const o = Number(ifd0.Orientation);
   return Number.isInteger(o) && o >= 1 && o <= 8 ? o : undefined;
@@ -211,6 +216,28 @@ export function jpegSize(b: Uint8Array): { width: number; height: number } | und
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Width and height from the file's header, read before decoding (JPEG, PNG, WebP, GIF), so a tiny file that
+ * would decode to a huge picture ("decompression bomb") can be refused without using the memory.
+ */
+export function headerSize(b: Uint8Array): { width: number; height: number } | undefined {
+  const kind = sniffImage(b);
+  const u32 = (o: number) => ((b[o]! << 24) | (b[o + 1]! << 16) | (b[o + 2]! << 8) | b[o + 3]!) >>> 0;
+  if (kind === 'jpeg') return jpegSize(b);
+  if (kind === 'png' && b.length >= 24) return { width: u32(16), height: u32(20) };
+  if (kind === 'gif' && b.length >= 10) return { width: b[6]! | (b[7]! << 8), height: b[8]! | (b[9]! << 8) };
+  if (kind === 'webp' && b.length >= 30) {
+    const chunk = String.fromCharCode(b[12]!, b[13]!, b[14]!, b[15]!);
+    if (chunk === 'VP8X') return { width: 1 + (b[24]! | (b[25]! << 8) | (b[26]! << 16)), height: 1 + (b[27]! | (b[28]! << 8) | (b[29]! << 16)) };
+    if (chunk === 'VP8L') {
+      const bits = b[21]! | (b[22]! << 8) | (b[23]! << 16) | (b[24]! << 24);
+      return { width: 1 + (bits & 0x3fff), height: 1 + ((bits >>> 14) & 0x3fff) };
+    }
+    if (chunk === 'VP8 ') return { width: (b[26]! | (b[27]! << 8)) & 0x3fff, height: (b[28]! | (b[29]! << 8)) & 0x3fff };
+  }
+  return undefined;
 }
 
 /** Lists everything an image file reveals about where, when, how and by whom it was made. */

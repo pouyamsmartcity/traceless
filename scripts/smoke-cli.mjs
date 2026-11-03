@@ -37,12 +37,19 @@ send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '
 send({ jsonrpc: '2.0', method: 'notifications/initialized' });
 send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
 send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'inspect_file', arguments: { path: fixture('leaky/voice-note.ogg') } } });
-const deadline = Date.now() + 20000;
-while (replies.length < 3 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+// A slow tool call must not hold up a ping sent after it; a bad line must not stop the server.
+send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'clean_file', arguments: { path: join(dir, 'photo.jpg'), output: join(dir, 'slow.jpg') } } });
+server.stdin.write('null\n');
+send({ jsonrpc: '2.0', id: 5, method: 'ping' });
+const deadline = Date.now() + 30000;
+while (replies.length < 6 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
 server.kill();
 const byId = Object.fromEntries(replies.map((r) => [r.id, r]));
 if (byId[1]?.result?.serverInfo?.name !== 'pakkon') fail('initialize');
 if (byId[2]?.result?.tools?.length !== 3) fail('tools/list');
 if (!byId[3]?.result?.content?.[0]?.text?.includes('Enghelab')) fail('tools/call inspect_file');
-if (readdirSync(dir).length !== 2) fail('unexpected files written');
+const order = replies.map((r) => r.id);
+if (order.indexOf(5) < 0 || order.indexOf(4) < 0 || order.indexOf(5) > order.indexOf(4)) fail(`ping waited behind a tool call (order ${order})`);
+if (!replies.some((r) => r.id === null && r.error?.code === -32600)) fail('no error answer to a bad line');
+if (readdirSync(dir).length !== 3) fail('unexpected files written');
 console.log('CLI and MCP server: OK');

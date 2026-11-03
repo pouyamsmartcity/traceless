@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch makes older runs pointless: cancel them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unit:
     runs-on: ubuntu-latest
@@ -22,8 +27,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:cli
+      - run: npm audit --omit=dev --audit-level=high
 
-  # The browser tests take a while (they run real detection and video encoding): two machines share them.
+  # The browser tests run real detection and video encoding: two machines share them.
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -38,7 +44,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --shard=${{ matrix.shard }}/2
         env:
           CI: '1'
+      # On failure, keep what Playwright recorded (screens, network, console) for 7 days.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 7

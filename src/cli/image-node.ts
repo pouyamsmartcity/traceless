@@ -2,7 +2,7 @@ import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import { imageLeftovers, type OutputType } from '../lib/clean-image';
 import type { Rect } from '../lib/detect/geometry';
-import { sniffImage } from '../lib/inspect-image';
+import { headerSize, sniffImage } from '../lib/inspect-image';
 import { stripJpeg } from '../lib/jpeg';
 import { stripPng } from '../lib/png';
 
@@ -38,9 +38,22 @@ export class NodeImageError extends Error {
 
 export function decodePixels(bytes: Uint8Array): { pixels: Pixels; type: OutputType } {
   const kind = sniffImage(bytes);
+  // The size is read from the header first: a small file that decodes to a huge picture is refused unread.
+  const size = headerSize(bytes);
+  if ((kind === 'jpeg' || kind === 'png') && (!size || size.width * size.height > NODE_MAX_PIXELS)) {
+    throw new NodeImageError(size ? 'tooLarge' : 'unsupported', size ? `picture of ${size.width} x ${size.height} pixels is too large` : 'the picture is damaged or incomplete (its size cannot be read)');
+  }
+  try {
+    return decodeKnown(bytes, kind);
+  } catch (e) {
+    if (e instanceof NodeImageError) throw e;
+    // jpeg-js and pngjs report damage in their own words ("unexpected marker: ffff").
+    throw new NodeImageError('unsupported', `the picture is damaged or incomplete (${e instanceof Error ? e.message : String(e)})`);
+  }
+}
+
+function decodeKnown(bytes: Uint8Array, kind: ReturnType<typeof sniffImage>): { pixels: Pixels; type: OutputType } {
   if (kind === 'jpeg') {
-    const size = jpegDims(bytes);
-    if (size && size.width * size.height > NODE_MAX_PIXELS) throw new NodeImageError('tooLarge', 'picture too large');
     const img = jpeg.decode(bytes, { useTArray: true, formatAsRGBA: true, maxResolutionInMP: NODE_MAX_PIXELS / 1e6, maxMemoryUsageInMB: 2048 });
     return { pixels: { width: img.width, height: img.height, data: new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.length) }, type: 'image/jpeg' };
   }
@@ -48,22 +61,11 @@ export function decodePixels(bytes: Uint8Array): { pixels: Pixels; type: OutputT
     // Only the picture chunks are decoded: text, EXIF and anything after the end (an uncropped screenshot's
     // leftovers, "aCropalypse") never reach the decoder.
     const png = PNG.sync.read(Buffer.from(stripPng(bytes)));
-    if (png.width * png.height > NODE_MAX_PIXELS) throw new NodeImageError('tooLarge', 'picture too large');
     return { pixels: { width: png.width, height: png.height, data: new Uint8Array(png.data.buffer, png.data.byteOffset, png.data.length) }, type: 'image/png' };
   }
   throw new NodeImageError('unsupported', `${kind} pictures are only supported in the Pakkon app (browser)`);
 }
 
-function jpegDims(b: Uint8Array): { width: number; height: number } | undefined {
-  for (let i = 2; i + 9 < b.length; ) {
-    if (b[i] !== 0xff) return undefined;
-    const m = b[i + 1]!;
-    const len = (b[i + 2]! << 8) | b[i + 3]!;
-    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { height: (b[i + 5]! << 8) | b[i + 6]!, width: (b[i + 7]! << 8) | b[i + 8]! };
-    i += 2 + len;
-  }
-  return undefined;
-}
 
 /** Turns the pixels upright according to the EXIF orientation (1-8), as browsers do when showing a photo. */
 export function orient(p: Pixels, orientation = 1): Pixels {

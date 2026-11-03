@@ -41,7 +41,19 @@ window.addEventListener('paste', (e) => {
   if (files.length) app.addFiles(files);
 });
 
+// A part of the app that cannot be loaded any more (the site was updated while this tab was open): ask the user to
+// reload instead of failing in the middle of a file.
+window.addEventListener('vite:preloadError', (e) => {
+  e.preventDefault();
+  app.showUpdateReady();
+});
+
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  // A newer version took over while this tab was open: offer a reload (never reload by itself mid-task).
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) app.showUpdateReady();
+  });
   navigator.serviceWorker
     .register('./sw.js', { scope: './' })
     .then((reg) => {

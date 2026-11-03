@@ -123,7 +123,16 @@ let nextId = 1;
 const THUMBNAIL_DIFF = 0.12;
 
 /** The whole new video is built in memory; beyond this size phones run out of memory. */
-const MAX_VIDEO_BYTES = 2 * 1024 ** 3;
+/**
+ * Largest video or recording this device can handle. Making the new file needs about five times its size in
+ * memory (the new file is built in memory, rebuilt once more and checked); past that the browser closes the tab and
+ * everything in it is lost. The device's memory is used where the browser tells it; otherwise 1 GB is assumed safe.
+ */
+export function maxMediaBytes(deviceMemoryGb = (navigator as { deviceMemory?: number }).deviceMemory): number {
+  const cap = 2 * 1024 ** 3;
+  if (!deviceMemoryGb || !(deviceMemoryGb > 0)) return 1024 ** 3;
+  return Math.min(cap, Math.round((deviceMemoryGb * 1024 ** 3) / 5));
+}
 
 export function isVideoFile(file: File): boolean {
   if (file.type.startsWith('video/')) return true;
@@ -342,7 +351,7 @@ async function hasPicture(file: File): Promise<boolean> {
 
 /** Voice note or recording: a fresh M4A with nothing but the sound (voice changed when asked). */
 async function processAudio(item: Item, opts: Options, set: (status: ItemStatus, progress?: number, step?: string) => void): Promise<void> {
-  if (item.file.size > MAX_VIDEO_BYTES) throw new RangeError('recording larger than 2 GB');
+  if (item.file.size > maxMediaBytes()) throw new RangeError('recording too large for this device');
   const voice = audioVoice(item, opts);
   const { cleanAudio } = await import('../lib/clean-audio');
   item.abort = new AbortController();
@@ -368,12 +377,20 @@ export function audioVoice(item: Item, o: Options): boolean {
   return item.soundOverride !== 'keep' && (o.voice || o.mute);
 }
 
+/** Shortest time between two redraws of a card for progress alone. */
+const PROGRESS_INTERVAL_MS = 100;
+
 export async function processItem(item: Item, liveOpts: Options, detector: Detector, update: () => void): Promise<void> {
   // Use the options as they were when processing started: switches changed meanwhile are handled
   // afterwards (photos are remade, videos offer "make again"), so notes always match the delivered file.
   const opts: Options = { ...liveOpts };
   /** `step` names the piece of work being timed (one status can cover several, such as faces then text). */
+  // Video and sound steps report progress for every packet (thousands per minute): the card is redrawn at most
+  // ten times a second, and always when the status changes or a step ends.
+  let lastDraw = 0;
+  let lastStatus: ItemStatus | undefined;
   const set = (status: ItemStatus, progress?: number, step: string = status) => {
+    const changed = status !== lastStatus || progress === undefined || progress >= 1;
     item.status = status;
     if (progress === undefined || !Number.isFinite(progress)) {
       delete item.progress;
@@ -382,6 +399,10 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
       item.progress = progress;
       item.clock = tick(item.clock, step, progress, Date.now());
     }
+    const now = performance.now();
+    if (!changed && now - lastDraw < PROGRESS_INTERVAL_MS) return;
+    lastDraw = now;
+    lastStatus = status;
     update();
   };
   try {
@@ -389,7 +410,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
     if (item.media === 'audio') {
       await processAudio(item, opts, set);
     } else if (item.media === 'video') {
-      if (item.file.size > MAX_VIDEO_BYTES) throw new RangeError('video larger than 2 GB');
+      if (item.file.size > maxMediaBytes()) throw new RangeError('video too large for this device');
       // A "video" file with sound only (a voice note saved as .mp4 or .webm) is handled as a recording.
       if (!(await hasPicture(item.file))) {
         item.media = 'audio';
@@ -455,19 +476,27 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
       item.output!.name = item.output!.name.replace(/^img-/, 'vid-');
     } else {
       const bytes = new Uint8Array(await item.file.arrayBuffer());
+      if (sniffImage(bytes) === 'unknown' && !item.file.type.startsWith('image/')) {
+        throw new ImageCleanError('unsupported', 'not an image');
+      }
+      // Reading what the file reveals and decoding the picture happen at the same time.
+      const decoding = decodeImage(item.file);
+      decoding.catch(() => undefined);
       const inspection = await inspectImage(bytes);
       item.findings = inspection.findings;
       item.partial = inspection.partial;
       item.outputType = chooseOutputType(bytes);
-      if (sniffImage(bytes) === 'unknown' && !item.file.type.startsWith('image/')) {
-        throw new ImageCleanError('unsupported', 'not an image');
-      }
-      item.decoded = await decodeImage(item.file);
+      item.decoded = await decoding;
       item.hints = inspection.hints;
-      if (inspection.thumbnail) {
-        const diff = await thumbnailDifference(inspection.thumbnail, item.decoded, inspection.orientation);
-        if (diff !== undefined && diff > THUMBNAIL_DIFF) item.hints.push({ id: 'thumbnailDiffers' });
-      }
+      // The hidden thumbnail is compared while the detectors work (it only adds a hint).
+      const decoded = item.decoded;
+      const thumbCheck = inspection.thumbnail
+        ? thumbnailDifference(inspection.thumbnail, decoded, inspection.orientation)
+            .then((diff) => {
+              if (diff !== undefined && diff > THUMBNAIL_DIFF) item.hints.push({ id: 'thumbnailDiffers' });
+            })
+            .catch(() => undefined)
+        : Promise.resolve();
       set('detecting', 0);
       try {
         item.detections = await detector.detect(item.decoded.element, item.decoded.width, item.decoded.height, {
@@ -485,6 +514,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
         if (e instanceof DetectionError) item.detections = e.partial;
       }
       if (opts.text) await ensureText(item, detector, (p) => set('detecting', p, 'text'));
+      await thumbCheck;
       set('cleaning');
       await renderImage(item, opts);
       if (item.detectFailed && coveringRequested(opts)) item.needsReview = true;

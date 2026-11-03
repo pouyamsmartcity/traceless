@@ -49,11 +49,22 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      // Old app versions, and the share storage older versions used, are removed.
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('pakkon-') && k !== CACHE).map((k) => caches.delete(k))))
+      // Older versions are removed, except the one just before this: a tab still open on it keeps finding the
+      // parts it loads later (video, voice notes, ZIP), until it is reloaded. Cache names come back oldest first.
+      .then((keys) => {
+        const ours = keys.filter((k) => k.startsWith('pakkon-') && k !== CACHE);
+        const keep = ours.filter((k) => k !== 'pakkon-shared').slice(-1);
+        return Promise.all(ours.filter((k) => !keep.includes(k)).map((k) => caches.delete(k)));
+      })
       .then(() => self.clients.claim()),
   );
 });
+
+/** Our file for a request: from this version's copy first, then from the version before (see activate). */
+async function stored(request) {
+  const opts = { ignoreSearch: true, ignoreVary: true };
+  return (await caches.match(request, { cacheName: CACHE, ...opts })) || (await caches.match(request, opts));
+}
 
 /** Files received from the share sheet, held in memory only (never written to storage) until the page takes them. */
 let sharedFiles = [];
@@ -83,6 +94,9 @@ function isolated(response) {
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
   headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+  // No other site may show Pakkon inside a frame (a page cannot say this about itself in a meta tag).
+  headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+  headers.set('X-Frame-Options', 'DENY');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -99,5 +113,5 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(caches.match('./index.html', { cacheName: CACHE, ignoreSearch: true, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));
     return;
   }
-  event.respondWith(caches.match(request, { cacheName: CACHE, ignoreSearch: true, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));
+  event.respondWith(stored(request).then((r) => r || fetch(request)).then(isolated));
 });

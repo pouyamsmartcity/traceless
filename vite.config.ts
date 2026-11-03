@@ -1,9 +1,11 @@
 /// <reference types="vitest/config" />
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
+// @ts-expect-error plain JavaScript build helper (no type declarations)
+import { MODELS_NOTE, writeNotices } from './scripts/notices.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 
@@ -56,10 +58,11 @@ function serviceWorker(): Plugin {
     name: 'pakkon-service-worker',
     apply: 'build',
     configResolved(config) {
-      outDir = config.build.outDir;
+      outDir = resolve(config.root, config.build.outDir);
     },
     closeBundle() {
-      const dist = join(ROOT, outDir);
+      const dist = outDir;
+      writeNotices(dist, ['mediabunny', 'exifr', 'onnxruntime-web', 'vazirmatn'], MODELS_NOTE);
       const files = listFiles(dist)
         .map((p) => relative(dist, p).split('\\').join('/'))
         .filter((f) => f !== 'sw.js' && !f.endsWith('.map') && !f.endsWith('.md'))

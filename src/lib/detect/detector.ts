@@ -7,8 +7,12 @@ const DETECT_MAX_SIDE = 2048;
 /** Tile sides at detection scale: small tiles help to find small, far-away faces in crowds. */
 const FACE_TILE = 640;
 const PLATE_TILE = 1152;
-/** First run includes loading the runtime and models; later runs take well under a second. */
+/** A run normally takes well under a second; this is the most a run may take before the worker is restarted. */
 const INFER_TIMEOUT_MS = 120_000;
+/** The first run of a model also loads it (an 18 MB file on a slow connection when there is no offline copy yet). */
+const FIRST_RUN_TIMEOUT_MS = 300_000;
+/** Starting the worker and the runtime. */
+const START_TIMEOUT_MS = 90_000;
 
 /** Some detection passes failed; `partial` holds what the passes that worked found. */
 export class DetectionError extends Error {
@@ -100,6 +104,10 @@ export class Detector {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (b: InferResult) => void; reject: (e: Error) => void }>();
   private canvas: HTMLCanvasElement | undefined;
+  /** Models that have run in the current worker (their later runs get the shorter timeout). */
+  private readonly loaded = new Set<ModelId>();
+  /** The worker has said it is ready. */
+  private started = false;
 
   constructor(private readonly base: string) {}
 
@@ -108,13 +116,23 @@ export class Detector {
     this.ready = new Promise<void>((resolve, reject) => {
       const w = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
       this.worker = w;
+      // A worker that never says it is ready (its script could not load) must not hold up every file after it.
+      const timer = setTimeout(() => {
+        reject(new Error('detector did not start'));
+        if (this.worker === w) this.reset();
+      }, START_TIMEOUT_MS);
       w.onmessage = (e: MessageEvent<WorkerResponse>) => {
         const m = e.data;
-        if (m.type === 'ready') resolve();
+        if (m.type === 'ready') {
+          clearTimeout(timer);
+          this.started = true;
+          resolve();
+        }
         else if (m.type === 'result') this.settle(m.id, m.map ? { boxes: [], map: m.map } : { boxes: m.boxes });
         else this.settle(m.id, new Error(m.message));
       };
       w.onerror = (e) => {
+        clearTimeout(timer);
         const err = new Error(e.message || 'detector worker failed');
         reject(err);
         this.reset();
@@ -130,6 +148,8 @@ export class Detector {
     this.worker?.terminate();
     this.worker = undefined;
     this.ready = undefined;
+    this.started = false;
+    this.loaded.clear();
   }
 
   private settle(id: number | undefined, value: InferResult | Error): void {
@@ -142,20 +162,24 @@ export class Detector {
   }
 
   private async inferRaw(model: ModelId, tensor: Float32Array, width: number, height: number): Promise<InferResult> {
-    await this.start();
+    // Once the worker runs, the request is posted at once (no await), so the caller can prepare the next
+    // picture while this one is being looked at.
+    if (!this.started) await this.start();
     const id = this.nextId++;
     return new Promise<InferResult>((resolve, reject) => {
       // Never hang: if the model does not answer in time, give up (the photo is still cleaned,
       // and the user is told to cover things by hand) and start a fresh worker next time.
+      const first = !this.loaded.has(model);
       const timer = setTimeout(() => {
         if (!this.pending.has(id)) return;
         this.pending.delete(id);
         reject(new Error('detector timed out'));
         this.reset();
-      }, INFER_TIMEOUT_MS);
+      }, first ? FIRST_RUN_TIMEOUT_MS : INFER_TIMEOUT_MS);
       this.pending.set(id, {
         resolve: (b) => {
           clearTimeout(timer);
+          this.loaded.add(model);
           resolve(b);
         },
         reject: (e) => {
@@ -257,29 +281,35 @@ export class Detector {
       work = shrunk;
     }
     const found: { model: ModelId; box: Rect; score: number }[] = [];
-    let done = 0;
     let failure: unknown;
+    // Every run to do: each pass, and for faces also its mirrored picture (+5% of small faces on our crowd set;
+    // video frames: only for the whole-frame pass, to keep long videos quick).
+    const jobs = passes.flatMap((pass, p) => {
+      const spec = MODELS[pass.model];
+      const lb = letterbox(pass.region, spec.size);
+      const mirror = pass.model === 'face' && (!opts.quick || pass.region === passes[0]?.region);
+      return [{ pass, p, spec, lb, mirror: false }, ...(mirror ? [{ pass, p, spec, lb, mirror: true }] : [])];
+    });
+    const prepare = (j: (typeof jobs)[number]) => this.prepare(work, shrunk ? scale : 1, j.lb, j.spec.pad, j.spec.pixels, j.mirror);
     try {
-      for (const pass of passes) {
-        const spec = MODELS[pass.model];
-        const lb = letterbox(pass.region, spec.size);
+      // The next picture is prepared while the worker looks at the current one.
+      let next: Float32Array | Error | undefined = jobs.length ? tryPrepare(() => prepare(jobs[0]!)) : undefined;
+      for (let i = 0; i < jobs.length; i++) {
+        const job = jobs[i]!;
+        const tensor = next!;
+        const run = tensor instanceof Error ? Promise.reject(tensor) : this.infer(job.pass.model, tensor, job.spec.size, job.spec.size);
+        run.catch(() => undefined);
+        next = i + 1 < jobs.length ? tryPrepare(() => prepare(jobs[i + 1]!)) : undefined;
         try {
-          const tensor = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels);
-          const boxes = await this.infer(pass.model, tensor, spec.size, spec.size);
-          for (const b of boxes) found.push({ model: pass.model, box: unletterbox(b, lb), score: b.score });
-          // Faces are also looked for in the mirrored picture (+5% of small faces on our crowd set).
-          // Video frames: only for the whole-frame pass, to keep long videos quick.
-          if (pass.model === 'face' && (!opts.quick || pass.region === passes[0]?.region)) {
-            const mirrored = this.prepare(work, shrunk ? scale : 1, lb, spec.pad, spec.pixels, true);
-            for (const b of await this.infer('face', mirrored, spec.size, spec.size)) {
-              const unflipped = { x1: spec.size - b.x2, x2: spec.size - b.x1, y1: b.y1, y2: b.y2, score: b.score };
-              found.push({ model: 'face', box: unletterbox(unflipped, lb), score: b.score });
-            }
+          for (const b of await run) {
+            // Boxes from the mirrored picture are flipped back.
+            const box = job.mirror ? { x1: job.spec.size - b.x2, x2: job.spec.size - b.x1, y1: b.y1, y2: b.y2, score: b.score } : b;
+            found.push({ model: job.pass.model, box: unletterbox(box, job.lb), score: b.score });
           }
         } catch (e) {
           failure ??= e;
         }
-        opts.onProgress?.(++done / passes.length);
+        if (!jobs[i + 1] || jobs[i + 1]!.p !== job.p) opts.onProgress?.((job.p + 1) / passes.length);
       }
     } finally {
       if (shrunk) {
@@ -364,4 +394,13 @@ export function planTextPasses(w: number, h: number, quick = false): { region: R
     for (const t of tiles(w, h, tile, 0.1)) passes.push(plan(t));
   }
   return passes;
+}
+
+/** Runs a preparation step, returning its error instead of throwing (so one bad pass does not stop the others). */
+function tryPrepare(f: () => Float32Array): Float32Array | Error {
+  try {
+    return f();
+  } catch (e) {
+    return e instanceof Error ? e : new Error(String(e));
+  }
 }
