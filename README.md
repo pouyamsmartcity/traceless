@@ -1,6 +1,15 @@
+<p align="center"><img src="public/og-en.jpg" alt="Traceless: remove hidden data from photos and videos, cover faces and plates" width="820"></p>
+
 # Traceless: remove photo and video metadata, cover faces, offline
 
 **English** · [فارسی](README.fa.md) · [Türkçe](README.tr.md)
+
+<p align="center">
+  <a href="https://github.com/pouyamsmartcity/traceless/actions/workflows/ci.yml"><img src="https://github.com/pouyamsmartcity/traceless/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-0f6b59" alt="MIT licence"></a>
+  <img src="https://img.shields.io/badge/works-offline-0f6b59" alt="Works offline">
+  <img src="https://img.shields.io/badge/languages-English%20%7C%20Persian%20%7C%20Turkish-0f6b59" alt="English, Persian, Turkish">
+</p>
 
 Make a photo, video or voice note safe to share, in one step, fully offline. Traceless removes the hidden data
 (EXIF metadata, GPS location, phone model and serial number, dates) that can reveal where, when and with which device
@@ -12,6 +21,33 @@ In Persian it is called «بی‌ردپا», in Turkish "İzsiz": both mean the 
 **Use it:** https://pouyamsmartcity.github.io/traceless/ (also in [Persian](https://pouyamsmartcity.github.io/traceless/fa/)
 and [Turkish](https://pouyamsmartcity.github.io/traceless/tr/)). Open it once with internet; after that it works
 offline, and it can be installed on the phone's home screen.
+
+<p align="center">
+  <a href="https://pouyamsmartcity.github.io/traceless/"><b>Open Traceless</b></a> ·
+  <a href="https://pouyamsmartcity.github.io/traceless/fa/">باز کردن به فارسی</a> ·
+  <a href="https://pouyamsmartcity.github.io/traceless/tr/">Türkçe aç</a>
+</p>
+
+## See it work
+
+<p align="center">
+  <img src="docs/images/demo.gif" alt="Choosing a photo: the face is covered, the hidden data is listed and removed, and a slider compares the safe copy with the original" width="300">
+</p>
+
+<p align="center"><img src="docs/images/before-after.jpg" alt="Before: the photo with its hidden location, phone model, serial number, owner and date. After: the safe copy with the face covered and nothing hidden" width="820"></p>
+
+| Choose a file | The safe copy | Protection levels | Cover by hand |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/images/home-en.jpg" alt="Home screen" width="190"> | <img src="docs/images/result-en.jpg" alt="A cleaned photo: face covered, location, device and time removed" width="190"> | <img src="docs/images/settings-en.jpg" alt="Settings: standard, strong and maximum protection, what to cover, cover look, sound" width="190"> | <img src="docs/images/editor-en.jpg" alt="Editor: draw or remove covers, crop" width="190"> |
+
+| فارسی | Türkçe | Crowds, dark look |
+|:---:|:---:|:---:|
+| <img src="docs/images/result-fa.jpg" alt="The safe copy in Persian" width="230"> | <img src="docs/images/result-tr.jpg" alt="The safe copy in Turkish" width="230"> | <img src="docs/images/desktop-dark.jpg" alt="Dark look on a computer: twelve faces covered in a crowd photo" width="300"> |
+
+The pictures are made from the real app by `scripts/readme-images.mjs`. The photo is a public-domain NASA portrait;
+every hidden value shown (location, phone, owner) is fake.
+
+## What it does
 
 - **Offline.** Everything runs on your phone or computer. The page is not allowed to contact any server (strict
   Content Security Policy), there are no accounts and no analytics. After the first visit it works without internet.

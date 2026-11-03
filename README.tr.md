@@ -1,3 +1,5 @@
+<p align="center"><img src="public/og-tr.jpg" alt="Traceless (İzsiz): fotoğraf ve videolardaki gizli bilgileri silin, yüzleri ve plakaları kapatın" width="820"></p>
+
 # Traceless (İzsiz): fotoğraf ve videodan meta veri ve konum silme, yüz gizleme, internetsiz
 
 [English](README.md) · [فارسی](README.fa.md) · **Türkçe**
@@ -11,6 +13,18 @@ renkle kapatır. Ücretsiz ve açık kaynaktır; hiçbir dosya bir yere yüklenm
 
 Bir kez internetle açın; sonrasında internetsiz de çalışır. Telefonun ana ekranına eklenip bir uygulama gibi
 kullanılabilir.
+
+## Nasıl çalıştığını görün
+
+<p align="center">
+  <img src="docs/images/home-tr.jpg" alt="Ana ekran" width="260">
+  <img src="docs/images/demo.gif" alt="Bir fotoğraf seçmek: yüz kapatılır, gizli bilgiler listelenip silinir, kaydırıcıyla özgünüyle karşılaştırılır" width="260">
+  <img src="docs/images/result-tr.jpg" alt="Güvenli kopya: yüz kapatıldı; konum, cihaz ve zaman silindi" width="260">
+</p>
+
+<p align="center"><img src="docs/images/before-after.jpg" alt="Önce: gizli konum, telefon modeli, seri numarası, sahip adı ve tarih taşıyan fotoğraf. Sonra: yüzü kapatılmış, gizli bilgisi olmayan güvenli kopya" width="820"></p>
+
+Örnek fotoğraf, kamuya açık bir NASA portresidir; gösterilen tüm gizli bilgiler (konum, telefon, ad) sahtedir.
 
 ## Ne yapar
 
