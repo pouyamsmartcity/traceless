@@ -1564,3 +1564,42 @@ input.masked {
     border-radius: 24px;
   }
 }
+
+/* ---------- Keep only a part of a video ---------- */
+
+.trim-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  animation: rise 0.25s var(--ease) both;
+}
+
+.trim-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-weight: 800;
+}
+
+.trim-row {
+  display: grid;
+  grid-template-columns: 2.5em 1fr 4.5em;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.trim-row input[type='range'] {
+  width: 100%;
+  accent-color: var(--brand);
+}
+
+.trim-row output {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}

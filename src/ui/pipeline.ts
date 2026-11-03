@@ -11,7 +11,7 @@ import { isAudioFile } from '../lib/media-kind';
 import { tick, type PhaseClock } from '../lib/eta';
 
 export type ItemStatus = 'queued' | 'reading' | 'detecting' | 'cleaning' | 'ready' | 'error';
-export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'audio' | 'videoMask' | 'voice' | 'cancelled' | 'generic';
+export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'audio' | 'videoMask' | 'voice' | 'trim' | 'cancelled' | 'generic';
 
 export interface Item {
   id: number;
@@ -39,6 +39,14 @@ export interface Item {
   /** Number of text regions seen by a quick look when text covering is off (for the location warning). */
   textSeen?: number;
   droppedTracks: number;
+  /** Photo: keep only this part (pixels of the upright picture), chosen in the editor. */
+  crop?: Rect;
+  /** Video: keep only this part (seconds from the start), chosen by the user. */
+  trim?: { start: number; end: number };
+  /** Video: the trim the current copy was made with. */
+  trimmedWith?: { start: number; end: number };
+  /** Video: length of the original in seconds. */
+  sourceDuration?: number;
   /** When the file was added (auto-forget keeps files added after the app went to the background). */
   addedAt?: number;
   /** Recording: the voice was changed in this copy. */
@@ -241,6 +249,7 @@ function errorKind(e: unknown): ErrorKind {
   if (e instanceof VideoCleanError) {
     if (e.reason === 'cannotMask') return 'videoMask';
     if (e.reason === 'cannotVoice') return 'voice';
+    if (e.reason === 'cannotTrim') return 'trim';
     return e.reason === 'leftovers' ? 'leftovers' : e.reason === 'cancelled' ? 'cancelled' : 'video';
   }
   if (e instanceof RangeError) return 'tooLarge';
@@ -256,7 +265,7 @@ function setOutput(item: Item, blob: Blob, ext: string): void {
 export async function renderImage(item: Item, opts: Options): Promise<void> {
   if (!item.decoded || !item.outputType) throw new Error('image not decoded');
   const snapshot: Options = { ...opts };
-  const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra, style: opts.maskStyle, light: opts.light });
+  const bytes = await renderClean(item.decoded, activeMasks(item, opts), item.outputType, { extra: opts.extra, style: opts.maskStyle, light: opts.light, ...(item.crop ? { crop: item.crop } : {}) });
   const type = item.outputType;
   const ext = type === 'image/png' ? 'png' : 'jpg';
   // Keep the same random name on re-render so a user does not get confused by changing names.
@@ -410,6 +419,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
             mute,
             voice,
             light: opts.light,
+            ...(item.trim ? { trim: item.trim } : {}),
             signal: item.abort.signal,
             onProgress: (phase, p) => set(phase === 'detect' ? 'detecting' : 'cleaning', p),
           });
@@ -417,6 +427,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
           item.droppedTracks = r.droppedTracks;
           item.audioKept = r.audioKept;
           item.lightApplied = r.light ?? false;
+          if (r.sourceDuration !== undefined) item.sourceDuration = r.sourceDuration;
           item.videoMasks = 'covered';
           item.videoObjects = r.maxObjects;
         } catch (e) {
@@ -430,13 +441,16 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
       }
       if (!bytes) {
         set('cleaning', 0);
-        const result = await cleanVideo(item.file, (p) => set('cleaning', p), { mute, voice, light: opts.light });
+        const result = await cleanVideo(item.file, (p) => set('cleaning', p), { mute, voice, light: opts.light, ...(item.trim ? { trim: item.trim } : {}) });
         item.lightApplied = result.light ?? false;
+        if (result.sourceDuration !== undefined) item.sourceDuration = result.sourceDuration;
         bytes = result.bytes;
         item.droppedTracks = result.droppedTracks;
         item.audioKept = result.audioKept;
       }
       item.videoMadeWith = effectiveVideoOptions(item, opts);
+      if (item.trim) item.trimmedWith = { ...item.trim };
+      else delete item.trimmedWith;
       setOutput(item, new Blob([bytes as BlobPart], { type: 'video/mp4' }), 'mp4');
       item.output!.name = item.output!.name.replace(/^img-/, 'vid-');
     } else {

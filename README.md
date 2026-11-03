@@ -31,6 +31,8 @@ which device a picture was taken, and covers faces and licence plates with solid
   re-encodes the sound into a fresh M4A that holds nothing else, and can change the voice too.
 - **Smaller files on request** for slow or expensive connections: photos at most 1600 pixels, videos at most 1280
   pixels at a lower bitrate, voice notes at 32 kbit/s. Every card shows the size before and after.
+- **Keep only what you need.** Cut a video to the part that matters (the picture is encoded again, so nothing
+  from before the cut survives), or crop a photo in the editor; covers move with the picture.
 - **Wipe in one tap.** The bin in the header forgets every original and copy in the app at once; "auto-forget" does
   it by itself five minutes after the app goes to the background.
 - **Save all as one ZIP** (files stored as they are, with no real dates inside), or share them all at once.

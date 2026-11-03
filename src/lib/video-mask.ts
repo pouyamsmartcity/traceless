@@ -10,12 +10,13 @@ import {
   QUALITY_HIGH,
   QUALITY_LOW,
   QUALITY_MEDIUM,
+  canEncodeAudio,
   canEncodeVideo,
   type VideoSample,
 } from 'mediabunny';
 import { sourceFromBlob } from './bytes';
 import { assertSaneMovie, inspectVideo } from './bmff';
-import { finishVideo, lightSize, soundConversion, type CleanVideoResult } from './clean-video';
+import { clampTrim, finishVideo, lightSize, soundConversion, type CleanVideoResult, type Trim } from './clean-video';
 import type { Detector } from './detect/detector';
 import { paintCovers, sampleColors, shrinkOutline, type MaskStyle } from './masks';
 import { masksAt, sampleTimes, type TimedBoxes } from './video-timeline';
@@ -47,6 +48,8 @@ export interface MaskedVideoOptions {
   mute?: boolean;
   /** Change voices. */
   voice?: boolean;
+  /** Keep only this part (seconds from the start of the video). */
+  trim?: Trim;
   /** Smaller picture and bitrate (for slow or expensive internet). */
   light?: boolean;
   onProgress?: (phase: 'detect' | 'encode', fraction: number) => void;
@@ -96,7 +99,16 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
     const audio = await input.getPrimaryAudioTrack().catch(() => null);
     const shift = Math.max(0, await input.getFirstTimestamp(audio ? [track, audio] : [track]));
     const end = await track.computeDuration();
-    const times = sampleTimes(start, end, SAMPLE_STEP);
+    // Keeping only a part: look for faces only there, and cut the new video to it.
+    const keep = clampTrim(opts.trim, Math.max(0, end - shift));
+    const from = keep ? shift + keep.start : shift;
+    const to = keep ? shift + keep.end : end;
+    const times = sampleTimes(Math.max(start, from), Math.min(end, to), SAMPLE_STEP);
+    // The sound is cut exactly too when this browser can encode it.
+    if (keep && !sound.audio && typeof AudioEncoder !== 'undefined') {
+      const codec = (await canEncodeAudio('aac').catch(() => false)) ? 'aac' : (await canEncodeAudio('opus').catch(() => false)) ? 'opus' : null;
+      if (codec) sound.audio = { codec, forceTranscode: true };
+    }
     const scale = Math.min(1, DETECT_SIDE / Math.max(W, H));
     const cw = Math.max(2, Math.round(W * scale));
     const ch = Math.max(2, Math.round(H * scale));
@@ -169,7 +181,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       tags: {},
       showWarnings: false,
       ...sound,
-      trim: { start: shift },
+      trim: keep ? { start: from, end: to } : { start: shift },
       video: {
         codec: 'avc',
         // The new video is built in memory: long videos use a lower bitrate so phones do not run out.
@@ -188,7 +200,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
           }
           sample.draw(ctx, 0, 0, sw, sh);
           const fx = sw / W;
-          paintCovers(ctx, masksAt(timeline, sample.timestamp + shift, W, H), opts.style ?? 'smart', fx, sw, sh);
+          paintCovers(ctx, masksAt(timeline, sample.timestamp + from, W, H), opts.style ?? 'smart', fx, sw, sh);
           return canvas;
         },
       },
@@ -217,6 +229,7 @@ export async function cleanVideoWithMasks(file: Blob, detector: Detector, opts: 
       droppedTracks: Math.max(0, before.tracks.length - conversion.utilizedTracks.length),
       audioKept: conversion.utilizedTracks.some((t) => t.isAudioTrack()),
       light: !!opts.light,
+      sourceDuration: Math.max(0, end - shift),
       framesWithMasks,
       maxObjects,
     };

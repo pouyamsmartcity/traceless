@@ -295,6 +295,123 @@ test.describe('Pakkon: new features', () => {
     expect(spread).toBeLessThan(25);
   });
 
+  test('keeps only a chosen part of a video, with the faces still covered', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut-pan.mp4'));
+    let item = await readyItem(page);
+    await openMore(item);
+    await item.getByTestId('trim-open').click();
+    const setRange = (id: string, v: number) =>
+      item.getByTestId(id).evaluate((el: HTMLInputElement, value) => {
+        el.value = String(value);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }, v);
+    await setRange('trim-start', 1);
+    await setRange('trim-end', 2.5);
+    await item.getByTestId('trim-apply').click();
+    item = await readyItem(page);
+    await expect(item.getByTestId('trimmed-note')).toBeVisible();
+    const video = item.locator('video.preview');
+    const duration = await video.evaluate(async (v: HTMLVideoElement) => {
+      if (!(v.duration > 0)) await new Promise((r) => (v.onloadedmetadata = r));
+      return v.duration;
+    });
+    expect(duration).toBeGreaterThan(1.3);
+    expect(duration).toBeLessThan(1.7);
+    // The face moves left by 30 px/s (centre x = 224 - 30t in the original); the new video starts at t = 1 s.
+    for (const tt of [0.1, 0.7, 1.3]) {
+      const spread = await video.evaluate(async (v: HTMLVideoElement, args) => {
+        v.currentTime = args.tt;
+        await new Promise((r) => (v.onseeked = r));
+        const c = document.createElement('canvas');
+        c.width = v.videoWidth;
+        c.height = v.videoHeight;
+        const ctx = c.getContext('2d')!;
+        ctx.drawImage(v, 0, 0);
+        const d = ctx.getImageData(Math.round(224 - 30 * (args.tt + 1)) - 20, 98, 40, 40).data;
+        let lo = 255;
+        let hi = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const l = 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!;
+          lo = Math.min(lo, l);
+          hi = Math.max(hi, l);
+        }
+        return hi - lo;
+      }, { tt });
+      expect(spread, `face at ${tt}s`).toBeLessThan(25);
+    }
+    // Back to the whole video.
+    await openMore(item);
+    await item.getByTestId('trim-open').click();
+    await item.getByTestId('trim-reset').click();
+    item = await readyItem(page);
+    await expect(item.getByTestId('trimmed-note')).toHaveCount(0);
+  });
+
+  test('cuts a video without covering too (the picture is encoded again, so nothing before the cut remains)', async ({ page }) => {
+    await page.goto('/');
+    await setOpt(page, 'faces', false);
+    await setOpt(page, 'plates', false);
+    await page.getByTestId('file-input').setInputFiles(fixture('leaky/video-location.mp4'));
+    let item = await readyItem(page);
+    await openMore(item);
+    await item.getByTestId('trim-open').click();
+    await item.getByTestId('trim-start').evaluate((el: HTMLInputElement) => {
+      el.value = '0.8';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await item.getByTestId('trim-apply').click();
+    item = await readyItem(page);
+    const duration = await item.locator('video.preview').evaluate(async (v: HTMLVideoElement) => {
+      if (!(v.duration > 0)) await new Promise((r) => (v.onloadedmetadata = r));
+      return v.duration;
+    });
+    expect(Math.abs(duration - 1.2)).toBeLessThan(0.15);
+    const bytes = await bytesOf(page, await item.getByTestId('save').getAttribute('href'));
+    expect((await inspectVideo(sourceFromBytes(bytes))).findings).toEqual([]);
+  });
+
+  test('crops a photo in the editor; covers move with the picture', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
+    let item = await readyItem(page);
+    await item.getByTestId('edit').click();
+    await page.getByTestId('editor-crop').click();
+    const canvas = page.locator('.editor-canvas');
+    const box = (await canvas.boundingBox())!;
+    // Keep the top-left quarter-and-a-bit: x 100..356, y 40..296 of the 512 x 512 picture (the face is inside).
+    const at = (x: number, y: number) => [box.x + (x / 512) * box.width, box.y + (y / 512) * box.height] as const;
+    await page.mouse.move(...at(100, 40));
+    await page.mouse.down();
+    await page.mouse.move(...at(230, 170), { steps: 4 });
+    await page.mouse.move(...at(356, 296), { steps: 4 });
+    await page.mouse.up();
+    await page.getByTestId('editor-done').click();
+    item = await readyItem(page);
+    await expect(item.getByTestId('cropped-note')).toBeVisible();
+    const info = await item.getByTestId('output-image').evaluate(async (img: HTMLImageElement) => {
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+      // The face (205..245, 95..145 in the original) is now at (105..145, 55..105): still one solid colour.
+      const d = ctx.getImageData(110, 60, 30, 40).data;
+      let lo = 255;
+      let hi = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const l = 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!;
+        lo = Math.min(lo, l);
+        hi = Math.max(hi, l);
+      }
+      return { w: img.naturalWidth, h: img.naturalHeight, spread: hi - lo };
+    });
+    expect(Math.abs(info.w - 256)).toBeLessThanOrEqual(3);
+    expect(Math.abs(info.h - 256)).toBeLessThanOrEqual(3);
+    expect(info.spread).toBeLessThan(6);
+  });
+
   test('wipe: one tap forgets every file and copy', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));

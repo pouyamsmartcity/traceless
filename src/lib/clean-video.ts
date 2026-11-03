@@ -7,6 +7,7 @@ import {
   Input,
   Mp4OutputFormat,
   Output,
+  QUALITY_HIGH,
   QUALITY_LOW,
   canEncodeAudio,
   canEncodeVideo,
@@ -90,6 +91,24 @@ export interface CleanVideoResult {
   audioKept: boolean;
   /** Whether the picture was made smaller (light option). */
   light?: boolean;
+  /** Length of the original video in seconds (for choosing a part to keep). */
+  sourceDuration?: number;
+}
+
+/** A part of a video to keep, in seconds from its start. */
+export interface Trim {
+  start: number;
+  end: number;
+}
+
+/** The trim limited to the video and at least half a second long; undefined when it keeps everything. */
+export function clampTrim(trim: Trim | undefined, duration: number): Trim | undefined {
+  if (!trim || !(duration > 0)) return undefined;
+  const start = Math.max(0, Math.min(trim.start, duration));
+  const end = Math.max(start, Math.min(trim.end, duration));
+  if (end - start < 0.5) throw new VideoCleanError('cannotTrim', 'the part to keep is shorter than half a second');
+  if (start <= 0.01 && end >= duration - 0.01) return undefined;
+  return { start, end };
 }
 
 /**
@@ -101,7 +120,7 @@ export interface CleanVideoResult {
 export async function cleanVideo(
   file: Blob,
   onProgress?: (fraction: number) => void,
-  opts: SoundOptions & { light?: boolean } = {},
+  opts: SoundOptions & { light?: boolean; trim?: Trim } = {},
 ): Promise<CleanVideoResult> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
@@ -130,6 +149,27 @@ export async function cleanVideo(
         }
       }
     }
+    // Keeping only a part: the picture is encoded again, so not a single frame from before the cut survives
+    // (copying would have to start at the previous key frame).
+    const first = await input.getFirstTimestamp().catch(() => 0);
+    const sourceDuration = Math.max(0, (await input.computeDuration().catch(() => first)) - first);
+    const keep = clampTrim(opts.trim, sourceDuration);
+    let sound = await soundConversion(opts);
+    if (keep) {
+      if (!video) {
+        const track = await input.getPrimaryVideoTrack().catch(() => null);
+        const size = track ? { width: await track.getDisplayWidth(), height: await track.getDisplayHeight() } : undefined;
+        if (!size || typeof VideoEncoder === 'undefined' || !(await canEncodeVideo('avc', size).catch(() => false))) {
+          throw new VideoCleanError('cannotTrim', 'this device cannot encode video');
+        }
+        video = { codec: 'avc', bitrate: QUALITY_HIGH, forceTranscode: true, allowTransformationMetadata: false };
+      }
+      // The sound is cut exactly too when this browser can encode it.
+      if (!sound.audio && typeof AudioEncoder !== 'undefined') {
+        const codec = (await canEncodeAudio('aac').catch(() => false)) ? 'aac' : (await canEncodeAudio('opus').catch(() => false)) ? 'opus' : null;
+        if (codec) sound = { audio: { codec, forceTranscode: true } };
+      }
+    }
     const target = new BufferTarget();
     const output = new Output({
       format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
@@ -142,8 +182,9 @@ export async function cleanVideo(
       tags: {},
       showWarnings: false,
       // Voices and background sounds can identify people and places: sound can be left out or changed.
-      ...(await soundConversion(opts)),
+      ...sound,
       ...(video ? { video } : {}),
+      ...(keep ? { trim: { start: first + keep.start, end: first + keep.end } } : {}),
     });
     const keptVideo = conversion.utilizedTracks.some((t) => t.isVideoTrack());
     if (!conversion.isValid || !keptVideo) {
@@ -162,7 +203,8 @@ export async function cleanVideo(
       bytes,
       droppedTracks: Math.max(0, before.tracks.length - conversion.utilizedTracks.length),
       audioKept: conversion.utilizedTracks.some((t) => t.isAudioTrack()),
-      light: !!video,
+      light: !!video && !!opts.light,
+      sourceDuration,
     };
   } finally {
     input.dispose();

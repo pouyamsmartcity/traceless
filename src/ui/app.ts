@@ -571,6 +571,8 @@ export class App {
   /** Cards whose "More" actions are shown, and whose list of leaks was opened or closed by the user. */
   private readonly moreOpen = new Set<number>();
   private readonly findingsOpen = new Map<number, boolean>();
+  /** Videos whose "keep only a part" panel is open. */
+  private readonly trimOpen = new Set<number>();
   private protectEl: HTMLElement | undefined;
 
   /** The protection level and the switches that are on, in one line under the picker. */
@@ -769,6 +771,7 @@ export class App {
         audio: t.errAudio,
         videoMask: t.errVideoMask,
         voice: t.errVoice,
+        trim: t.errTrim,
         cancelled: t.errCancelled,
         generic: t.errGeneric,
       }[item.error ?? 'generic'];
@@ -788,6 +791,17 @@ export class App {
         body.appendChild(
           h('div', { className: 'actions' }, item.media === 'audio' ? null : choose('mute', t.voiceInsteadMute, 'voice-mute'), choose('keep', t.voiceKeep, 'voice-keep')),
         );
+      }
+      if (item.error === 'trim') {
+        const whole = h('button', { type: 'button', className: 'btn', 'data-testid': 'trim-whole' }, t.trimReset);
+        whole.addEventListener('click', () => {
+          delete item.trim;
+          item.status = 'queued';
+          delete item.error;
+          this.updateCard(item);
+          this.enqueue(item);
+        });
+        body.appendChild(whole);
       }
       if (item.error === 'videoMask') {
         const go = h('button', { type: 'button', className: 'btn', 'data-testid': 'continue-without' }, t.continueWithout);
@@ -848,6 +862,7 @@ export class App {
         }
         if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
         if (used.extra) body.appendChild(h('p', { className: 'note', 'data-testid': 'extra-note' }, t.extraApplied));
+        if (item.crop) body.appendChild(h('p', { className: 'note', 'data-testid': 'cropped-note' }, t.croppedNote));
         body.appendChild(h('p', { className: 'note' }, t.checkShort));
       } else {
         // Say exactly what this video was made with.
@@ -869,6 +884,10 @@ export class App {
         if (item.videoMadeWith?.voice && item.audioKept) body.appendChild(h('p', { className: 'note', 'data-testid': 'voice-note' }, t.videoVoiced));
         if (!item.videoMadeWith?.mute && item.audioKept === false) body.appendChild(h('p', { className: 'note', 'data-testid': 'no-sound-note' }, t.videoNoSound));
         if (item.videoMadeWith?.light && item.lightApplied === false) body.appendChild(h('p', { className: 'note', 'data-testid': 'light-unavailable' }, t.lightUnavailable));
+        if (item.trimmedWith) {
+          body.appendChild(h('p', { className: 'note', 'data-testid': 'trimmed-note' }, t.trimmedNote(clock(lang, item.trimmedWith.start), clock(lang, item.trimmedWith.end))));
+        }
+        if (this.trimOpen.has(item.id)) body.appendChild(this.trimPanel(item));
         if (!upToDate(item, this.settings)) body.appendChild(this.rebuildButton(item, t.rebuildVideo));
       }
       if (item.needsReview) body.appendChild(this.reviewGate(item));
@@ -891,6 +910,60 @@ export class App {
       body.appendChild(rm);
     }
     this.updateBulk();
+  }
+
+  /** Two sliders to choose the part of the video to keep; the player jumps to the chosen edge. */
+  private trimPanel(item: Item): HTMLElement {
+    const t = this.t;
+    const lang = this.settings.lang;
+    const d = item.sourceDuration ?? 0;
+    const cur = item.trim ?? { start: 0, end: d };
+    const step = d > 120 ? 1 : 0.1;
+    const mk = (value: number, id: string) => h('input', { type: 'range', min: 0, max: d.toFixed(1), step, value: value.toFixed(1), 'data-testid': id });
+    const from = mk(cur.start, 'trim-start');
+    const to = mk(cur.end, 'trim-end');
+    const fromLabel = h('output', {}, clock(lang, cur.start));
+    const toLabel = h('output', {}, clock(lang, cur.end));
+    const apply = h('button', { type: 'button', className: 'btn primary small', 'data-testid': 'trim-apply' }, t.trimApply);
+    const player = this.cards.get(item.id)?.querySelector('video');
+    const sync = (moved: HTMLInputElement) => {
+      // The part keeps at least one second.
+      let a = Number(from.value);
+      let b = Number(to.value);
+      if (b - a < 1) {
+        if (moved === from) a = Math.max(0, b - 1);
+        else b = Math.min(d, a + 1);
+        from.value = String(a);
+        to.value = String(b);
+      }
+      fromLabel.textContent = clock(lang, a);
+      toLabel.textContent = clock(lang, b);
+      // Preview from the original timeline only when the copy is still the whole video.
+      if (player && !item.trimmedWith) player.currentTime = moved === from ? a : b;
+    };
+    from.addEventListener('input', () => sync(from));
+    to.addEventListener('input', () => sync(to));
+    const remake = (trim: { start: number; end: number } | undefined) => {
+      if (trim) item.trim = trim;
+      else delete item.trim;
+      this.trimOpen.delete(item.id);
+      if (item.output) URL.revokeObjectURL(item.output.url);
+      delete item.output;
+      item.status = 'queued';
+      this.updateCard(item);
+      this.enqueue(item);
+    };
+    apply.addEventListener('click', () => remake({ start: Number(from.value), end: Number(to.value) }));
+    const whole = h('button', { type: 'button', className: 'btn ghost small', 'data-testid': 'trim-reset' }, t.trimReset);
+    whole.addEventListener('click', () => remake(undefined));
+    return h(
+      'div',
+      { className: 'trim-panel', 'data-testid': 'trim-panel' },
+      h('p', { className: 'trim-title' }, icon(ICONS.timer, 16), t.trimTitle),
+      h('label', { className: 'trim-row' }, h('span', {}, t.trimStart), from, fromLabel),
+      h('label', { className: 'trim-row' }, h('span', {}, t.trimEnd), to, toLabel),
+      h('div', { className: 'actions' }, apply, item.trimmedWith ? whole : null),
+    );
   }
 
   private rebuildButton(item: Item, label: string): HTMLElement {
@@ -934,6 +1007,7 @@ export class App {
       if (texts) add('cover', ICONS.text, t.report.texts(n(texts)));
       if (people) add('cover', ICONS.person, t.report.people(n(people)));
     } else if (item.media === 'video') {
+      if (item.trimmedWith) add('cover', ICONS.timer, t.trimChip);
       if (item.videoMadeWith?.mute) add('sound', ICONS.muteIcon, t.report.muted);
       else if (item.videoMadeWith?.voice && item.audioKept) add('sound', ICONS.mic, t.report.voice);
     } else if (item.audioVoiced) {
@@ -1090,6 +1164,14 @@ export class App {
       await shareOrSave([r.file], true);
     });
     more.appendChild(sealBtn);
+    if (item.media === 'video' && item.sourceDuration && item.sourceDuration > 1) {
+      const trimBtn = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'trim-open' }, icon(ICONS.timer), t.trimOpen);
+      trimBtn.addEventListener('click', () => {
+        this.trimOpen.add(item.id);
+        this.updateCard(item);
+      });
+      more.appendChild(trimBtn);
+    }
     if (item.media === 'image' && item.decoded) {
       const edit = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'edit' }, icon(ICONS.edit), t.editMasks);
       edit.addEventListener('click', async () => {
@@ -1396,4 +1478,14 @@ async function drawWaveform(blob: Blob, canvas: HTMLCanvasElement): Promise<void
 /** The promise's value, or undefined if it takes longer than `ms`. */
 function within<T>(ms: number, p: Promise<T>): Promise<T | undefined> {
   return Promise.race([p, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
+}
+
+/** Time as m:ss (or h:mm:ss) in the interface language's digits. */
+function clock(lang: Lang, seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  const text = h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+  return formatNumber(lang, text);
 }

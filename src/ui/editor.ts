@@ -13,17 +13,23 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
   if (!img) return Promise.resolve(false);
   const removed = new Set(item.removed);
   const manual: Rect[] = item.manual.map((r) => ({ ...r }));
+  // Crop: drag a frame to keep only that part of the picture.
+  let crop: Rect | undefined = item.crop ? { ...item.crop } : undefined;
+  let mode: 'cover' | 'crop' = 'cover';
   const history: (() => void)[] = [];
 
   const canvas = h('canvas', { className: 'editor-canvas', 'aria-label': t.editorHelp });
   const undoBtn = h('button', { type: 'button', className: 'btn ghost', disabled: true }, icon(ICONS.undo), t.editorUndo);
   const doneBtn = h('button', { type: 'button', className: 'btn primary', 'data-testid': 'editor-done' }, icon(ICONS.check), t.editorDone);
   const cancelBtn = h('button', { type: 'button', className: 'btn ghost' }, t.editorCancel);
+  const cropBtn = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'editor-crop', 'aria-pressed': 'false' }, icon(ICONS.crop), t.editorCrop);
+  const cropResetBtn = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'editor-crop-reset', hidden: !crop }, t.editorCropReset);
+  const help = h('p', { className: 'editor-help' }, t.editorHelp);
   const dialog = h(
     'div',
     { className: 'editor', role: 'dialog', 'aria-modal': 'true', 'aria-label': t.editorTitle },
-    h('div', { className: 'editor-bar' }, h('strong', {}, t.editorTitle), h('span', { className: 'spacer' }), undoBtn, cancelBtn, doneBtn),
-    h('p', { className: 'editor-help' }, t.editorHelp),
+    h('div', { className: 'editor-bar' }, h('strong', {}, t.editorTitle), h('span', { className: 'spacer' }), cropBtn, cropResetBtn, undoBtn, cancelBtn, doneBtn),
+    help,
     h('div', { className: 'editor-stage' }, canvas),
   );
   document.body.appendChild(dialog);
@@ -82,7 +88,22 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
       ctx.globalAlpha = 1;
       outline(c, '#4da3ff', false);
     }
-    if (drag) {
+    // The part outside the crop is shaded; the frame itself is outlined.
+    const frame = mode === 'crop' && drag ? norm(drag) : crop;
+    if (frame) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.beginPath();
+      ctx.rect(0, 0, img!.width, img!.height);
+      ctx.rect(frame.x, frame.y, frame.w, frame.h);
+      ctx.fill('evenodd');
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = lw;
+      ctx.setLineDash([8 / scale, 6 / scale]);
+      ctx.strokeRect(frame.x, frame.y, frame.w, frame.h);
+      ctx.restore();
+    }
+    if (drag && mode === 'cover') {
       const c: Cover = { ...norm(drag), shape: 'rounded' };
       ctx.globalAlpha = 0.6;
       paintCovers(ctx, [c], 'black', 1, img!.width, img!.height);
@@ -150,7 +171,18 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
     const r = norm(drag);
     const tapLimit = 10 / scale;
     drag = undefined;
-    if (r.w < tapLimit && r.h < tapLimit) tap(toImage(e));
+    if (mode === 'crop') {
+      // A tap does not crop; a frame of at least 16 x 16 pixels does.
+      if (r.w >= 16 && r.h >= 16) {
+        const before = crop;
+        crop = r;
+        cropResetBtn.hidden = false;
+        record(() => {
+          crop = before;
+          cropResetBtn.hidden = !crop;
+        });
+      }
+    } else if (r.w < tapLimit && r.h < tapLimit) tap(toImage(e));
     else if (r.w > 2 && r.h > 2) {
       manual.push(r);
       record(() => manual.pop());
@@ -183,6 +215,8 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
       if (save) {
         item.removed = removed;
         item.manual = manual;
+        if (crop) item.crop = crop;
+        else delete item.crop;
       }
       resolve(save);
     };
@@ -190,6 +224,23 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
       if (e.key === 'Escape') close(false);
     };
     window.addEventListener('keydown', onKey);
+    cropBtn.addEventListener('click', () => {
+      mode = mode === 'crop' ? 'cover' : 'crop';
+      cropBtn.setAttribute('aria-pressed', String(mode === 'crop'));
+      cropBtn.classList.toggle('open', mode === 'crop');
+      help.textContent = mode === 'crop' ? t.editorCropHelp : t.editorHelp;
+      draw();
+    });
+    cropResetBtn.addEventListener('click', () => {
+      const before = crop;
+      crop = undefined;
+      cropResetBtn.hidden = true;
+      record(() => {
+        crop = before;
+        cropResetBtn.hidden = !crop;
+      });
+      draw();
+    });
     const cancelView = () => close(false);
     openViews.add(cancelView);
     doneBtn.addEventListener('click', () => close(true));

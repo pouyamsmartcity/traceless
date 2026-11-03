@@ -1,3 +1,4 @@
+import type { Rect } from './detect/geometry';
 import { paintCovers, type Cover, type MaskStyle } from './masks';
 import { inspectImage, sniffImage } from './inspect-image';
 import { jpegProblems, stripJpeg } from './jpeg';
@@ -131,6 +132,17 @@ export interface RenderOptions {
   style?: MaskStyle;
   /** A smaller file for slow or expensive internet (at most LIGHT_MAX_SIDE pixels, lighter JPEG). */
   light?: boolean;
+  /** Keep only this part of the picture (pixels of the upright picture). */
+  crop?: Rect;
+}
+
+/** The crop limited to the picture (at least 8 x 8 pixels); undefined when it keeps everything. */
+export function cropArea(crop: Rect | undefined, w: number, h: number): Rect | undefined {
+  if (!crop) return undefined;
+  const x = Math.max(0, Math.min(w - 8, Math.round(crop.x)));
+  const y = Math.max(0, Math.min(h - 8, Math.round(crop.y)));
+  const r = { x, y, w: Math.max(8, Math.min(w - x, Math.round(crop.w))), h: Math.max(8, Math.min(h - y, Math.round(crop.h))) };
+  return r.x === 0 && r.y === 0 && r.w === w && r.h === h ? undefined : r;
 }
 
 /**
@@ -139,7 +151,9 @@ export interface RenderOptions {
  * `masks` are in the decoded image's pixels.
  */
 export async function renderClean(img: DecodedImage, masks: Cover[], type: OutputType, opts: RenderOptions = {}): Promise<Uint8Array> {
-  const { width, height, scale } = outputSize(img.width, img.height, opts.light ? LIGHT_MAX_SIDE : Infinity);
+  // Cropping: only the chosen part is drawn; covers are moved with it.
+  const area = cropArea(opts.crop, img.width, img.height) ?? { x: 0, y: 0, w: img.width, h: img.height };
+  const { width, height, scale } = outputSize(area.w, area.h, opts.light ? LIGHT_MAX_SIDE : Infinity);
   let canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -151,9 +165,10 @@ export async function renderClean(img: DecodedImage, masks: Cover[], type: Outpu
     ctx.fillRect(0, 0, width, height);
   }
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img.element, 0, 0, width, height);
+  ctx.drawImage(img.element, area.x, area.y, area.w, area.h, 0, 0, width, height);
   // Masks are painted before any further transformation, so they move with the picture.
-  paintCovers(ctx, masks, opts.style ?? 'smart', scale, width, height);
+  const placed = area.x || area.y ? masks.map((c) => ({ ...c, x: c.x - area.x, y: c.y - area.y })) : masks;
+  paintCovers(ctx, placed, opts.style ?? 'smart', scale, width, height);
   // A canvas the device could not allocate silently ends up with no size.
   if (canvas.width !== width || canvas.height !== height) throw new ImageCleanError('tooLarge', 'drawing surface failed');
 
