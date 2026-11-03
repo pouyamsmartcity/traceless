@@ -39,6 +39,8 @@ export interface Item {
   /** Number of text regions seen by a quick look when text covering is off (for the location warning). */
   textSeen?: number;
   droppedTracks: number;
+  /** When the file was added (auto-forget keeps files added after the app went to the background). */
+  addedAt?: number;
   /** Recording: the voice was changed in this copy. */
   audioVoiced?: boolean;
   /** Recording: made with the light option. */

@@ -124,6 +124,37 @@ test.describe('Pakkon: new features', () => {
     await expect(page.getByTestId('item')).toHaveCount(0);
   });
 
+  test('auto-forget keeps a photo taken while away (the in-app camera) and forgets the older files', async ({ page }) => {
+    await page.clock.install();
+    await page.goto('/');
+    await setOpt(page, 'autoWipe', true);
+    await page.getByTestId('file-input').setInputFiles(fixture('leaky/voice-note.ogg'));
+    await readyItem(page);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.clock.runFor(6 * 60 * 1000);
+    // The camera hands its photo over just before the page says it is visible again.
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(page.getByTestId('item')).toHaveCount(1);
+    await expect(page.getByTestId('item').first().getByTestId('item-status')).toHaveAttribute('class', /ready/, { timeout: 60_000 });
+    await expect(page.getByTestId('item').first().getByTestId('output-image')).toBeVisible();
+  });
+
+  test('screen readers hear once when a file is ready, not every percent of progress', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('item')).toHaveCount(0);
+    await expect(page.locator('.items[aria-live]')).toHaveCount(0);
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
+    await readyItem(page);
+    await expect(page.getByTestId('announcer')).toHaveText('astronaut.png: نسخهٔ امن آماده است');
+  });
+
   test('protection levels set several switches at once; the page shows what is on', async ({ page }) => {
     await page.goto('/');
     const summary = page.getByTestId('protect-summary');

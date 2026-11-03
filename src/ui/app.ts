@@ -157,6 +157,7 @@ export class App {
         continue;
       }
       const item = newItem(file);
+      item.addedAt = Date.now();
       this.items.unshift(item);
       this.listEl.prepend(this.cardFor(item));
       this.updateCard(item);
@@ -330,7 +331,10 @@ export class App {
       });
     }
 
-    this.listEl = h('section', { className: 'items', 'aria-live': 'polite' });
+    // Cards redraw on every bit of progress: a live region here would make screen readers talk non-stop.
+    // Only finished or failed files are announced, through the announcer below.
+    this.listEl = h('section', { className: 'items', 'aria-label': t.itemsLabel });
+    this.announcer = h('div', { className: 'visually-hidden', role: 'status', 'aria-live': 'polite', 'data-testid': 'announcer' });
     for (const entry of this.opened) this.listEl.appendChild(this.sealedCard(entry));
     for (const item of this.items) {
       this.listEl.appendChild(this.cardFor(item));
@@ -436,6 +440,7 @@ export class App {
         h('p', { className: 'small' }, t.dataCredit),
       ),
       this.toastEl,
+      this.announcer,
     );
     this.updateBulk();
     if (sheetWasOpen) {
@@ -445,6 +450,16 @@ export class App {
   }
 
   private toastEl: HTMLElement | undefined;
+  private announcer: HTMLElement | undefined;
+  /** Last status announced per file, so each change is said once. */
+  private readonly announced = new Map<number, string>();
+
+  private announce(item: Item): void {
+    if (item.status !== 'ready' && item.status !== 'error') return;
+    if (this.announced.get(item.id) === item.status) return;
+    this.announced.set(item.id, item.status);
+    if (this.announcer) this.announcer.textContent = `${item.file.name}: ${item.status === 'ready' ? this.t.statusReady : this.t.errGeneric}`;
+  }
 
   private toast(message: string): void {
     const el = this.toastEl;
@@ -498,7 +513,19 @@ export class App {
    * Forgets everything in this tab at once: originals, safe copies, opened sealed files and previews.
    * For when the phone may be taken; also run by "auto-forget".
    */
-  wipeAll(): void {
+  wipeAll(keepAddedAfter?: number): void {
+    if (keepAddedAfter !== undefined) {
+      // Auto-forget: files that arrived after the app went to the background (a photo just taken with the
+      // in-app camera) are kept; everything older is forgotten.
+      for (const item of [...this.items]) if ((item.addedAt ?? 0) <= keepAddedAfter) this.removeItem(item);
+      for (const close of [...openViews]) close();
+      this.settingsEl?.close();
+      for (const o of this.opened) if (o.url) URL.revokeObjectURL(o.url);
+      this.opened.length = 0;
+      for (const el of this.listEl.querySelectorAll('.sealed-card')) el.remove();
+      this.toast(this.t.wiped);
+      return;
+    }
     // Close anything showing an original first (the cover editor, passphrase sheets, settings).
     for (const close of [...openViews]) close();
     this.settingsEl?.close();
@@ -526,10 +553,15 @@ export class App {
       if (document.visibilityState === 'hidden') {
         if (!this.settings.autoWipe) return;
         hiddenAt = Date.now();
-        timer = setTimeout(() => this.settings.autoWipe && this.wipeAll(), AUTO_WIPE_MS);
+        const since = hiddenAt;
+        timer = setTimeout(() => {
+          if (!this.settings.autoWipe) return;
+          this.wipeAll(since);
+          hiddenAt = undefined; // done: nothing more to do when the app comes back
+        }, AUTO_WIPE_MS);
       } else {
         clearTimeout(timer);
-        if (hiddenAt !== undefined && this.settings.autoWipe && Date.now() - hiddenAt >= AUTO_WIPE_MS) this.wipeAll();
+        if (hiddenAt !== undefined && this.settings.autoWipe && Date.now() - hiddenAt >= AUTO_WIPE_MS) this.wipeAll(hiddenAt);
         hiddenAt = undefined;
       }
     });
@@ -707,6 +739,8 @@ export class App {
     const card = this.cardFor(item);
     clear(card);
     card.dataset.status = item.status;
+    this.announce(item);
+    if (item.status !== 'ready' && item.status !== 'error') this.announced.delete(item.id);
 
     // Preview: always the safe copy once it exists, so the user checks exactly what will be sent.
     // While the copy stays the same, the same preview (and its compare button) is kept, so a card refresh
@@ -1151,6 +1185,7 @@ export class App {
   }
 
   private removeItem(item: Item): void {
+    item.abort?.abort();
     const i = this.items.indexOf(item);
     if (i >= 0) this.items.splice(i, 1);
     if (item.output) URL.revokeObjectURL(item.output.url);
@@ -1278,10 +1313,14 @@ async function buildFilmstrip(url: string, strip: HTMLElement, player: HTMLVideo
   v.preload = 'auto';
   v.src = url;
   try {
-    await new Promise<void>((resolve, reject) => {
-      v.onloadeddata = () => resolve();
-      v.onerror = () => reject(new Error('cannot read video'));
-    });
+    const loaded = await within(
+      15000,
+      new Promise<boolean>((resolve) => {
+        v.onloadeddata = () => resolve(true);
+        v.onerror = () => resolve(false);
+      }),
+    );
+    if (!loaded) return;
     const d = v.duration;
     if (!Number.isFinite(d) || d <= 0) return;
     const w = 160;
@@ -1290,7 +1329,8 @@ async function buildFilmstrip(url: string, strip: HTMLElement, player: HTMLVideo
       if (cancelled()) return;
       const time = (d * (i + 0.5)) / frames;
       v.currentTime = time;
-      await new Promise<void>((resolve) => (v.onseeked = () => resolve()));
+      // A frame that never arrives (odd file) ends the strip instead of waiting forever.
+      if (!(await within(5000, new Promise<boolean>((resolve) => (v.onseeked = () => resolve(true)))))) break;
       const c = document.createElement('canvas');
       c.width = w;
       c.height = hgt;
@@ -1316,7 +1356,8 @@ async function drawWaveform(blob: Blob, canvas: HTMLCanvasElement): Promise<void
   if (!Ctx) return;
   const ac = new Ctx();
   try {
-    const buf = await ac.decodeAudioData(await blob.arrayBuffer());
+    const buf = await within(30000, ac.decodeAudioData(await blob.arrayBuffer()));
+    if (!buf) return;
     const data = buf.getChannelData(0);
     const bars = 64;
     const per = Math.max(1, Math.floor(data.length / bars));
@@ -1350,4 +1391,9 @@ async function drawWaveform(blob: Blob, canvas: HTMLCanvasElement): Promise<void
   } finally {
     void ac.close();
   }
+}
+
+/** The promise's value, or undefined if it takes longer than `ms`. */
+function within<T>(ms: number, p: Promise<T>): Promise<T | undefined> {
+  return Promise.race([p, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
 }
