@@ -178,24 +178,25 @@ function toBytes(d: AllowSharedBufferSource | undefined): Uint8Array | undefined
  * Rebuilds an MP4 (as made by our own conversion step) with only the primary video and audio tracks,
  * no track names or tags, and no metadata units inside the video stream.
  */
-export async function sanitizeMp4(bytes: Uint8Array): Promise<Uint8Array> {
+export async function sanitizeMp4(bytes: Uint8Array, opts: { audioOnly?: boolean } = {}): Promise<Uint8Array> {
   const input = new Input({ source: new BufferSource(bytes), formats: ALL_FORMATS });
   try {
-    const vt: InputVideoTrack | null = await input.getPrimaryVideoTrack();
-    if (!vt) throw new VideoCleanError('noVideo', 'no video track');
+    const vt: InputVideoTrack | null = opts.audioOnly ? null : await input.getPrimaryVideoTrack();
+    if (!vt && !opts.audioOnly) throw new VideoCleanError('noVideo', 'no video track');
     const at: InputAudioTrack | null = await input.getPrimaryAudioTrack();
-    const vcodec = await vt.getCodec();
-    if (!vcodec || !CLEANABLE.includes(vcodec)) throw new VideoCleanError('unsupported', `cannot clean ${vcodec} streams`);
-    const vconfig = await vt.getDecoderConfig();
-    if (!vconfig) throw new VideoCleanError('unsupported', 'no decoder config');
-    let desc = toBytes(vconfig.description);
+    if (opts.audioOnly && !at) throw new VideoCleanError('unsupported', 'no sound');
+    const vcodec = vt ? await vt.getCodec() : null;
+    if (vt && (!vcodec || !CLEANABLE.includes(vcodec))) throw new VideoCleanError('unsupported', `cannot clean ${vcodec} streams`);
+    const vconfig = vt ? await vt.getDecoderConfig() : null;
+    if (vt && !vconfig) throw new VideoCleanError('unsupported', 'no decoder config');
+    let desc = toBytes(vconfig?.description);
     if (vcodec === 'hevc' && desc) desc = stripHvcc(desc);
-    const lengthSize = nalLengthSize(vcodec, desc);
+    const lengthSize = vcodec ? nalLengthSize(vcodec, desc) : 4;
 
     const target = new BufferTarget();
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target });
-    const vsrc = new EncodedVideoPacketSource(vcodec);
-    output.addVideoTrack(vsrc, { rotation: await vt.getRotation() });
+    const vsrc = vcodec ? new EncodedVideoPacketSource(vcodec) : undefined;
+    if (vt && vsrc) output.addVideoTrack(vsrc, { rotation: await vt.getRotation() });
     let asrc: EncodedAudioPacketSource | undefined;
     const acodec = at ? await at.getCodec() : null;
     const aconfig = at ? await at.getDecoderConfig() : null;
@@ -206,6 +207,7 @@ export async function sanitizeMp4(bytes: Uint8Array): Promise<Uint8Array> {
     await output.start();
 
     const pumpVideo = async () => {
+      if (!vt || !vsrc || !vcodec || !vconfig) return;
       let first = true;
       for await (const p of new EncodedPacketSink(vt).packets()) {
         const { data } = stripPacket(vcodec, p.data, lengthSize);
@@ -224,6 +226,9 @@ export async function sanitizeMp4(bytes: Uint8Array): Promise<Uint8Array> {
       if (!at || !asrc || !aconfig) return;
       let first = true;
       for await (const p of new EncodedPacketSink(at).packets()) {
+        // Encoders write their name into sound frames (MP3 "Info"/LAME frames and padding, AAC fill data such as
+        // "Lavc60..."), in the silent start-up and end frames: such frames are left out.
+        if (audioSignature(p.data)) continue;
         const packet = new EncodedPacket(p.data, p.type, p.timestamp, p.duration);
         if (first) {
           await asrc.add(packet, { decoderConfig: aconfig });
@@ -239,6 +244,22 @@ export async function sanitizeMp4(bytes: Uint8Array): Promise<Uint8Array> {
   } finally {
     input.dispose();
   }
+}
+
+/** Names encoders leave inside sound frames (as plain text). */
+const SIGNATURES = ['LAME', 'Lavc', 'Lavf', 'Xing', 'Info', 'libfdk', 'FAAC', 'Nero', 'iTunes', 'GOGO', 'Encoded'];
+
+/** The encoder name found in a sound frame, if any. */
+export function audioSignature(data: Uint8Array): string | undefined {
+  const text = new TextDecoder('latin1').decode(data);
+  for (const sig of SIGNATURES) {
+    // "Info" and "Xing" only count where the MP3 header for them sits (first 64 bytes of a frame).
+    const i = text.indexOf(sig);
+    if (i < 0 || ((sig === 'Info' || sig === 'Xing') && i > 64)) continue;
+    // A real name, not a chance byte pattern: followed by letters, digits or dots.
+    if (sig === 'Info' || sig === 'Xing' || /^[A-Za-z]+[ ._-]?[0-9][0-9.a-z]*/.test(text.slice(i, i + 16)) || sig === 'iTunes' || sig === 'Encoded') return sig;
+  }
+  return undefined;
 }
 
 /** Independent check: lists metadata units still present in the video stream of an MP4. */
@@ -260,6 +281,24 @@ export async function streamLeftovers(bytes: Uint8Array): Promise<string[]> {
     return problems;
   } catch (e) {
     return [`stream not readable: ${e instanceof Error ? e.message : String(e)}`];
+  } finally {
+    input.dispose();
+  }
+}
+
+/** Independent check: encoder names left in the sound frames of an MP4 (empty list when none). */
+export async function soundLeftovers(bytes: Uint8Array): Promise<string[]> {
+  const input = new Input({ source: new BufferSource(bytes), formats: ALL_FORMATS });
+  try {
+    const at = await input.getPrimaryAudioTrack();
+    if (!at) return [];
+    for await (const p of new EncodedPacketSink(at).packets()) {
+      const sig = audioSignature(p.data);
+      if (sig) return [`encoder name "${sig}" in the sound`];
+    }
+    return [];
+  } catch (e) {
+    return [`sound not readable: ${e instanceof Error ? e.message : String(e)}`];
   } finally {
     input.dispose();
   }

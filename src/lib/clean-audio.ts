@@ -3,6 +3,7 @@ import { sourceFromBlob, sourceFromBytes } from './bytes';
 import { assertSaneMovie, inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
 import { soundConversion } from './clean-video';
 import { SEVERITY, type Finding, type FindingId } from './findings';
+import { sanitizeMp4, soundLeftovers } from './sanitize-video';
 import { VideoCleanError } from './video-errors';
 
 export { isAudioFile } from './media-kind';
@@ -95,11 +96,17 @@ export async function cleanAudio(
           : (await canEncodeAudio('opus').catch(() => false))
             ? ('opus' as const)
             : null;
-    if (!codec) throw new VideoCleanError(opts.voice ? 'cannotVoice' : 'unsupported', 'no AAC or Opus encoder');
+    if (!codec && opts.voice) throw new VideoCleanError('cannotVoice', 'no AAC or Opus encoder');
     // Speech needs little: 64 kbit/s (32 when made light) keeps a voice note clear and small.
     const bitrate = opts.light ? 32_000 : 64_000;
-    const sound: { audio?: ConversionAudioOptions } = opts.voice ? await soundConversion({ voice: true }) : { audio: { codec, forceTranscode: true, bitrate } };
-    if (sound.audio && !Array.isArray(sound.audio) && typeof sound.audio === 'object') sound.audio.bitrate = bitrate;
+    // Without an encoder (the command-line tool runs outside a browser) the sound frames are copied into the
+    // new file as they are; the file around them, with all its tags, is still new.
+    const sound: { audio?: ConversionAudioOptions } = opts.voice
+      ? await soundConversion({ voice: true })
+      : codec
+        ? { audio: { codec, forceTranscode: true, bitrate } }
+        : {};
+    if (codec && sound.audio && !Array.isArray(sound.audio) && typeof sound.audio === 'object') sound.audio.bitrate = bitrate;
 
     const target = new BufferTarget();
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target });
@@ -119,7 +126,8 @@ export async function cleanAudio(
     }
     checkAbort();
     if (!target.buffer) throw new VideoCleanError('failed', 'no output');
-    const bytes = new Uint8Array(target.buffer);
+    // Rebuilt once more frame by frame, leaving out frames that carry an encoder's name.
+    const bytes = await sanitizeMp4(new Uint8Array(target.buffer), { audioOnly: true });
     zeroMovieTimes(bytes);
     const problems = await audioLeftovers(bytes);
     if (problems.length) throw new VideoCleanError('leftovers', problems.join('; '));
@@ -136,6 +144,7 @@ export async function audioLeftovers(bytes: Uint8Array): Promise<string[]> {
   const problems = r.findings.map((f) => (f.value ? `${f.id}: ${f.value}` : f.id));
   if (r.tracks.length !== 1) problems.push(`tracks: ${r.tracks.join(',')}`);
   problems.push(...outputBoxProblems(bytes));
+  problems.push(...(await soundLeftovers(bytes)));
   const input = new Input({ source: new BlobSource(new Blob([bytes as BlobPart])), formats: ALL_FORMATS });
   try {
     if (await input.getPrimaryVideoTrack().catch(() => null)) problems.push('picture track');

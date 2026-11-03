@@ -104,6 +104,12 @@ file ──► inspect (what does it reveal?) ──► decode pixels ──► 
 - Video: [Mediabunny](https://mediabunny.dev/) re-packages the file; our own reader checks the result.
 - Offline: a service worker stores the whole app (about 48 MB, once; most of it is the detection models and runtime).
 
+## For programs and AI agents
+
+Pakkon is also a command-line tool and an [MCP](https://modelcontextprotocol.io) server, so scripts and AI agents
+(Claude, Cursor, VS Code, Codex and other MCP clients) can inspect, clean and check files on your computer, still
+fully offline. See [`docs/API.md`](docs/API.md). Developers and coding agents: start with [`AGENTS.md`](AGENTS.md).
+
 ## Development
 
 Requires Node.js 22.

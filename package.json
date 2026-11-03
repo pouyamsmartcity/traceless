@@ -2,9 +2,12 @@
   "name": "pakkon",
   "version": "0.1.0",
   "private": true,
-  "description": "Make photos and videos safe to share, fully offline: remove hidden location, device and time data, and mask faces and licence plates.",
+  "description": "Make photos, videos and voice notes safe to share, fully offline: remove hidden location, device and time data, cover faces and licence plates, change voices. Web app, command-line tool and MCP server for AI agents.",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "pakkon": "dist-cli/pakkon.mjs"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -12,17 +15,23 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "fixtures": "python3 scripts/make_fixtures.py"
+    "fixtures": "python3 scripts/make_fixtures.py",
+    "build:cli": "vite build --config vite.cli.config.ts",
+    "test:cli": "npm run build:cli && node scripts/smoke-cli.mjs",
+    "mcp": "node dist-cli/pakkon.mjs mcp"
   },
   "dependencies": {
     "exifr": "7.1.3",
+    "jpeg-js": "0.4.4",
     "mediabunny": "1.61.6",
     "onnxruntime-web": "1.30.0",
+    "pngjs": "7.0.0",
     "vazirmatn": "33.0.3"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "22.20.5",
+    "@types/pngjs": "6.0.5",
     "all-the-cities": "3.1.0",
     "axe-core": "4.14.0",
     "typescript": "6.0.3",

@@ -16,7 +16,7 @@ import {
 import { PitchShifter, VOICE_DRIFT, randomVoiceRatio } from './voice';
 import { sourceFromBlob, sourceFromBytes } from './bytes';
 import { assertSaneMovie, inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
-import { sanitizeMp4, streamLeftovers } from './sanitize-video';
+import { sanitizeMp4, soundLeftovers, streamLeftovers } from './sanitize-video';
 import { VideoCleanError } from './video-errors';
 
 export { VideoCleanError };
@@ -190,5 +190,6 @@ export async function videoLeftovers(bytes: Uint8Array): Promise<string[]> {
   if (r.tracks.length === 0 || r.tracks.length > 2) problems.push(`tracks: ${r.tracks.join(',')}`);
   problems.push(...outputBoxProblems(bytes));
   problems.push(...(await streamLeftovers(bytes)));
+  problems.push(...(await soundLeftovers(bytes)));
   return problems;
 }
