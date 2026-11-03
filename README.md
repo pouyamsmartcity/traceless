@@ -5,6 +5,9 @@ which device a picture was taken, and covers faces and licence plates with solid
 
 *Pakkon* (پاک‌کن) is Persian for "eraser".
 
+**Use it:** https://pouyamsmartcity.github.io/pakkon/ (open it once with internet; after that it works offline, and
+it can be installed on the phone's home screen).
+
 - **Offline.** Everything runs on your phone or computer. The page is not allowed to contact any server (strict
   Content Security Policy), there are no accounts and no analytics. After the first visit it works without internet.
 - **Rebuilt from pixels.** Photos are redrawn into a brand-new file. Location, phone model, serial numbers, owner

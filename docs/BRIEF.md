@@ -34,7 +34,9 @@ Added after the first pass (all tested):
 10. Pre-send checklist; error details for reports; shared originals wiped from storage; updates download only
     changed files.
 
-Not yet: voice change, text covering in video, HEIC decoding where the browser cannot open HEIC.
+Since then: voice change and voice notes, text and people covering in videos, tracking, cutting videos and
+cropping photos, wipe and auto-forget, a command-line tool and an MCP server for AI agents. The README lists the
+current features.
 
 ## Stack (decided)
 - Web app (TypeScript, Vite), no framework, runs fully in the browser; installable (service worker, manifest).
