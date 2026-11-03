@@ -1,12 +1,17 @@
-# Traceless · Traceless
+# Traceless: remove photo and video metadata, cover faces, offline
 
-Make a photo or video safe to share, in one step, fully offline. Traceless removes what can reveal where, when and with
-which device a picture was taken, and covers faces and licence plates with solid colour.
+**English** · [فارسی](README.fa.md) · [Türkçe](README.tr.md)
 
-*Traceless* (Traceless) is Persian for "eraser".
+Make a photo, video or voice note safe to share, in one step, fully offline. Traceless removes the hidden data
+(EXIF metadata, GPS location, phone model and serial number, dates) that can reveal where, when and with which device
+a file was made, and covers faces, licence plates and text with solid colour. Free and open source. Nothing is
+uploaded.
 
-**Use it:** https://pouyamsmartcity.github.io/traceless/ (open it once with internet; after that it works offline, and
-it can be installed on the phone's home screen).
+In Persian it is called «بی‌ردپا», in Turkish "İzsiz": both mean the same, "without a trace".
+
+**Use it:** https://pouyamsmartcity.github.io/traceless/ (also in [Persian](https://pouyamsmartcity.github.io/traceless/fa/)
+and [Turkish](https://pouyamsmartcity.github.io/traceless/tr/)). Open it once with internet; after that it works
+offline, and it can be installed on the phone's home screen.
 
 - **Offline.** Everything runs on your phone or computer. The page is not allowed to contact any server (strict
   Content Security Policy), there are no accounts and no analytics. After the first visit it works without internet.
@@ -56,7 +61,8 @@ it can be installed on the phone's home screen).
   there) are dropped. With covering on, the picture is re-encoded with covers on every frame;
   with covering off, picture and sound are copied without quality loss. Devices that cannot re-encode video still get
   the hidden data removed, with a clear warning that faces were not covered.
-- **Persian first**, English too. Random output file names. Installable on Android, iPhone and desktop; on Android
+- **English, Persian and Turkish**, chosen from the browser's language (or the page: `/fa/`, `/tr/`) and changeable
+  at any time. Random output file names. Installable on Android, iPhone and desktop; on Android
   you can share photos straight into Traceless from the gallery.
 
 ## What Traceless cannot do
@@ -154,6 +160,12 @@ host works, also under a sub-path. Recommended host settings:
   can already use several processor cores (the offline copy adds them by itself afterwards).
 - Send `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` (the offline copy adds them by
   itself) so no other site can show Traceless inside a frame.
+
+The build also writes one page per language (`/`, `/fa/`, `/tr/`) with its own title, description, links between
+the languages (hreflang), sharing previews and structured data, plus `sitemap.xml`. Set `SITE_URL` to the public
+address when building for another host (the Pages workflow does this). Search engines: submit
+`<site>/sitemap.xml` in Google Search Console and Bing Webmaster Tools (a project site cannot have its own
+`robots.txt`).
 
 Updates: a new version is downloaded in the background, file by file (unchanged files are reused, every file is
 checked against its fingerprint). Tabs that are open keep working on the version they started with; they show a

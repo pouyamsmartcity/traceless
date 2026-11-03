@@ -51,7 +51,8 @@ src/lib/            browser-free building blocks (most are also used by the CLI)
   detect/           ONNX models in a worker: faces (YuNet), plates (YOLOv9-t), text (PP-OCRv3), people (YOLOX-s), outlines (U-2-Net)
   seal.ts           sealed originals (PBKDF2 + AES-GCM, keyed seal code)
   voice.ts, zip.ts, places.ts, eta.ts, findings.ts, xmp.ts, bytes.ts
-src/ui/             the app: app.ts (screens and cards), pipeline.ts (per-file processing), editor.ts, i18n.ts (fa/en), styles.css
+src/ui/             the app: app.ts (screens and cards), pipeline.ts (per-file processing), editor.ts, i18n.ts (en/fa/tr), styles.css
+src/seo/pages.ts    the per-language pages (/, /fa/, /tr/) and sitemap, written at build time
 src/sw/             service worker template (offline copy, share target); built by vite.config.ts
 src/cli/            command line and MCP server: core.ts (inspect/clean/check), image-node.ts (JPEG/PNG without a browser), mcp.ts, main.ts
 e2e/                browser tests (app.spec.ts, features.spec.ts, a11y.spec.ts; helpers in ui.ts)
@@ -62,8 +63,12 @@ docs/               SECURITY.md (threats and limits), API.md (CLI and MCP), ROAD
 ## How to customise
 
 - **Default protection or levels:** `PRESETS` and `loadSettings()` in `src/ui/app.ts`.
-- **Interface text:** `src/ui/i18n.ts`. Persian is the main language; every key exists in both `fa` and `en`
-  (the type enforces it). Write plainly; avoid jargon.
+- **Interface text:** `src/ui/i18n.ts`. English is the main language; every key exists in `en`, `fa` and `tr` (the
+  type enforces it, `test/i18n.test.ts` checks nothing is left untranslated). Write plainly; avoid jargon. The app
+  starts in the browser's language (`detectLang`), or the page's on `/fa/` and `/tr/`.
+- **Search and sharing:** each language's page text, structured data and sitemap are made at build time by
+  `src/seo/pages.ts` (title and description come from `pageTitle`/`pageDescription` in `i18n.ts`); the preview
+  pictures are drawn by `scripts/og-images.mjs`. The site address is `SITE_URL` (default in `src/site.ts`).
 - **A new cover look:** add it to `MaskStyle` and `MASK_STYLES` in `src/lib/masks.ts`, paint it in
   `paintCovers` (keep it opaque), add a swatch in `styles.css` and a name in `i18n.ts`.
 - **A new detection model:** add it to `MODELS` in `src/lib/detect/models.ts` with its decoder, plan its passes in
