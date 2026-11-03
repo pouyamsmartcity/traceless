@@ -30,6 +30,7 @@ whose safety can depend on a file. Read this before changing anything.
 | `npm run test:e2e` | browser tests (Playwright, Chromium; builds and serves `dist/`) |
 | `npm run build:cli` / `npm run test:cli` | command-line tool and MCP server into `dist-cli/traceless.mjs`, and its smoke test |
 | `npm run fixtures` | regenerate the leaky test files (needs ffmpeg and ExifTool) |
+| `npm run images` | redraw the README screenshots, demo animation and link previews from the real app (needs ffmpeg) |
 
 Before you push: `npm run typecheck && npm test && npm run test:cli`, and the browser tests for anything in
 `src/ui/` or `src/lib/`. CI runs all of them (`.github/workflows/ci.yml`).

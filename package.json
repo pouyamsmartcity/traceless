@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "fixtures": "python3 scripts/make_fixtures.py",
+    "images": "npm run build && node scripts/readme-images.mjs && node scripts/og-images.mjs",
     "build:cli": "vite build --config vite.cli.config.ts",
     "test:cli": "npm run build:cli && node scripts/smoke-cli.mjs",
     "mcp": "node dist-cli/traceless.mjs mcp"
