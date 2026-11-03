@@ -1,7 +1,7 @@
 import { MAX_SEAL_BYTES, SealError, isSealed, normalizePassphrase, passphraseProblem, seal, unseal, type SealHeader } from '../lib/seal';
 
 export { MAX_SEAL_BYTES };
-import { ICONS, h, icon } from './dom';
+import { ICONS, h, icon, openViews } from './dom';
 import type { Strings } from './i18n';
 
 /**
@@ -48,6 +48,7 @@ export function askPassphrase(t: Strings, mode: 'seal' | 'open'): Promise<string
     document.body.appendChild(overlay);
     pass.focus();
     const close = (v: string | null) => {
+      openViews.delete(cancelView);
       pass.value = '';
       confirm.value = '';
       overlay.remove();
@@ -66,6 +67,8 @@ export function askPassphrase(t: Strings, mode: 'seal' | 'open'): Promise<string
       }
       close(pass.value);
     };
+    const cancelView = () => close(null);
+    openViews.add(cancelView);
     cancel.addEventListener('click', () => close(null));
     ok.addEventListener('click', submit);
     sheet.addEventListener('keydown', (e) => {

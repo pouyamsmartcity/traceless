@@ -12,10 +12,14 @@ describe('zip', () => {
 
   it('makes an archive that standard tools open, with no real date and unique names', async () => {
     const a = new Uint8Array(1000).map((_, i) => i % 251);
-    const blob = makeZip([
-      { name: 'img-a.jpg', data: a },
+    const blob = await makeZip([
+      { name: 'img-a.jpg', data: new Blob([a]) },
       { name: 'img-a.jpg', data: new Uint8Array([1, 2, 3]) },
       { name: 'عکس.png', data: new Uint8Array(0) },
+      { name: 'a/b.jpg', data: new Uint8Array([4]) },
+      { name: 'a/b.jpg', data: new Uint8Array([5]) },
+      { name: '', data: new Uint8Array([6]) },
+      { name: '', data: new Uint8Array([7]) },
     ]);
     const dir = mkdtempSync(join(tmpdir(), 'pakkon-zip-'));
     const path = join(dir, 'x.zip');
@@ -30,6 +34,11 @@ describe('zip', () => {
       ['img-a.jpg', 1000, [1980, 1, 1, 0, 0, 0], '', 0],
       ['img-a-2.jpg', 3, [1980, 1, 1, 0, 0, 0], '', 0],
       ['عکس.png', 0, [1980, 1, 1, 0, 0, 0], '', 0],
+      // Never a folder, even for repeated names.
+      ['a_b.jpg', 1, [1980, 1, 1, 0, 0, 0], '', 0],
+      ['a_b-2.jpg', 1, [1980, 1, 1, 0, 0, 0], '', 0],
+      ['file', 1, [1980, 1, 1, 0, 0, 0], '', 0],
+      ['file-2', 1, [1980, 1, 1, 0, 0, 0], '', 0],
     ]);
   });
 });

@@ -1,5 +1,5 @@
 import type { Rect } from '../lib/detect/geometry';
-import { ICONS, h, icon } from './dom';
+import { ICONS, h, icon, openViews } from './dom';
 import type { Strings } from './i18n';
 import { coverContains, paintCovers, traceCover, type Cover } from '../lib/masks';
 import { coverOf, kindEnabled, type Item, type Options } from './pipeline';
@@ -175,6 +175,7 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
 
   return new Promise((resolve) => {
     const close = (save: boolean) => {
+      openViews.delete(cancelView);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('keydown', onKey);
       dialog.remove();
@@ -189,6 +190,8 @@ export function openEditor(item: Item, opts: Options, t: Strings): Promise<boole
       if (e.key === 'Escape') close(false);
     };
     window.addEventListener('keydown', onKey);
+    const cancelView = () => close(false);
+    openViews.add(cancelView);
     doneBtn.addEventListener('click', () => close(true));
     cancelBtn.addEventListener('click', () => close(false));
     doneBtn.focus();

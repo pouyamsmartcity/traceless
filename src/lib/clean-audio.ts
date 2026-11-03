@@ -1,6 +1,6 @@
 import { ALL_FORMATS, BlobSource, BufferTarget, Conversion, Input, Mp4OutputFormat, Output, canEncodeAudio, type ConversionAudioOptions, type MetadataTags } from 'mediabunny';
 import { sourceFromBlob, sourceFromBytes } from './bytes';
-import { inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
+import { assertSaneMovie, inspectVideo, outputBoxProblems, zeroMovieTimes } from './bmff';
 import { soundConversion } from './clean-video';
 import { SEVERITY, type Finding, type FindingId } from './findings';
 import { VideoCleanError } from './video-errors';
@@ -20,6 +20,8 @@ export interface CleanAudioResult {
   findings: Finding[];
   /** The file type of the result (AAC in MP4, or Opus in MP4 where this browser has no AAC encoder). */
   type: 'audio/mp4';
+  /** The file also held a picture (a video saved as .m4a, for example), which was left out. */
+  droppedPicture: boolean;
 }
 
 
@@ -57,10 +59,26 @@ export function audioFindings(tags: MetadataTags): Finding[] {
  * Makes a clean M4A from any sound file this browser can read. Throws VideoCleanError: 'unsupported' when the
  * file cannot be read, 'cannotVoice' when no audio encoder exists, 'leftovers' when the check fails.
  */
-export async function cleanAudio(file: Blob, opts: { voice?: boolean; light?: boolean; onProgress?: (f: number) => void } = {}): Promise<CleanAudioResult> {
+export async function cleanAudio(
+  file: Blob,
+  opts: { voice?: boolean; light?: boolean; onProgress?: (f: number) => void; signal?: AbortSignal } = {},
+): Promise<CleanAudioResult> {
+  const checkAbort = () => {
+    if (opts.signal?.aborted) throw new VideoCleanError('cancelled', 'cancelled');
+  };
+  // MP4/M4A files: damaged sample tables can make the decoder spin for minutes; refuse them up front.
+  const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  if (head.length >= 8 && String.fromCharCode(head[4]!, head[5]!, head[6]!, head[7]!) === 'ftyp') {
+    try {
+      await assertSaneMovie(sourceFromBlob(file));
+    } catch (e) {
+      throw new VideoCleanError('unsupported', e instanceof Error ? e.message : String(e));
+    }
+  }
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
     const track = await input.getPrimaryAudioTrack().catch(() => null);
+    const picture = await input.getPrimaryVideoTrack().catch(() => null);
     if (!track) throw new VideoCleanError('unsupported', 'no sound in this file');
     const findings = audioFindings(await input.getMetadataTags().catch(() => ({})));
     // MP4/M4A originals: also what our own reader finds in the file's boxes (location, device, dates).
@@ -87,18 +105,25 @@ export async function cleanAudio(file: Blob, opts: { voice?: boolean; light?: bo
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target });
     const conversion = await Conversion.init({ input, output, tracks: 'primary', tags: {}, showWarnings: false, video: { discard: true }, ...sound });
     if (!conversion.isValid || !conversion.utilizedTracks.some((t) => t.isAudioTrack())) throw new VideoCleanError('unsupported', 'sound cannot be converted');
-    if (opts.onProgress) conversion.onProgress = (p) => opts.onProgress!(Math.max(0, Math.min(1, p)));
+    if (opts.onProgress) conversion.onProgress = (p) => opts.onProgress!(Math.max(0, Math.min(1, Number.isFinite(p) ? p : 0)));
+    checkAbort();
+    const onAbort = () => void conversion.cancel().catch(() => undefined);
+    opts.signal?.addEventListener('abort', onAbort);
     try {
       await conversion.execute();
     } catch (e) {
+      if (opts.signal?.aborted) throw new VideoCleanError('cancelled', 'cancelled');
       throw new VideoCleanError('failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      opts.signal?.removeEventListener('abort', onAbort);
     }
+    checkAbort();
     if (!target.buffer) throw new VideoCleanError('failed', 'no output');
     const bytes = new Uint8Array(target.buffer);
     zeroMovieTimes(bytes);
     const problems = await audioLeftovers(bytes);
     if (problems.length) throw new VideoCleanError('leftovers', problems.join('; '));
-    return { bytes, findings, type: 'audio/mp4' };
+    return { bytes, findings, type: 'audio/mp4', droppedPicture: !!picture };
   } finally {
     input.dispose();
   }

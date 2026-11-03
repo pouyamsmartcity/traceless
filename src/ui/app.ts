@@ -4,7 +4,7 @@ import { minutesLeft, secondsLeft } from '../lib/eta';
 import type { Rect } from '../lib/detect/geometry';
 import type { Finding, FindingId } from '../lib/findings';
 import { loadPlaces, nearest, type Place } from '../lib/places';
-import { ICONS, append, clear, h, icon } from './dom';
+import { ICONS, append, clear, h, icon, openViews } from './dom';
 import { openEditor } from './editor';
 import { MAX_SEAL_BYTES, looksSealed, openSealed, sealOriginal, type OpenResult } from './seal-ui';
 import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
@@ -18,6 +18,25 @@ interface Settings extends Options {
   /** Forget everything a while after the app goes to the background. */
   autoWipe: boolean;
 }
+
+/** The switches set by a protection level (cover look, file size and auto-forget stay as chosen). */
+const PRESETS = {
+  standard: { faces: true, plates: true, text: false, people: false, voice: false, mute: false, extra: false },
+  strong: { faces: true, plates: true, text: true, people: false, voice: true, mute: false, extra: true },
+  max: { faces: true, plates: true, text: true, people: true, voice: false, mute: true, extra: true },
+} as const;
+
+type Preset = keyof typeof PRESETS | 'custom';
+
+function presetOf(s: Options): Preset {
+  for (const [name, p] of Object.entries(PRESETS) as [keyof typeof PRESETS, (typeof PRESETS)[keyof typeof PRESETS]][]) {
+    if ((Object.keys(p) as (keyof typeof p)[]).every((k) => s[k] === p[k])) return name;
+  }
+  return 'custom';
+}
+
+/** Switches listed in the one-line summary, in this order. */
+const SUMMARY_KEYS = ['faces', 'plates', 'text', 'people', 'voice', 'mute', 'extra', 'light', 'autoWipe'] as const;
 
 /** How long the app may stay in the background before "auto-forget" wipes it. */
 const AUTO_WIPE_MS = 5 * 60 * 1000;
@@ -106,7 +125,9 @@ export class App {
 
   setOfflineReady(): void {
     this.offlineReady = true;
-    this.render();
+    // Only the badge changes (a full redraw could interrupt what the user is doing).
+    const badge = this.root.querySelector('[data-testid="offline-badge"] > span');
+    if (badge && !badge.querySelector('.ready')) badge.appendChild(h('span', { className: 'ready' }, ` · ${this.t.offlineReady}`));
     // Now the models come from the stored copy (once this page is served by the worker).
     const sw = 'serviceWorker' in navigator ? navigator.serviceWorker : undefined;
     if (!sw || sw.controller) this.detector.warmUp();
@@ -217,6 +238,9 @@ export class App {
   }
 
   private render(): void {
+    // A redraw (language, theme, install prompt) keeps the settings sheet open if it was.
+    const sheetWasOpen = this.settingsEl?.open === true;
+    this.settingsEl?.close();
     const t = this.t;
     document.documentElement.lang = this.settings.lang;
     document.documentElement.dir = this.settings.lang === 'fa' ? 'rtl' : 'ltr';
@@ -265,6 +289,7 @@ export class App {
       box.addEventListener('change', () => {
         this.settings[key] = box.checked;
         saveSettings(this.settings);
+        this.refreshProtection();
         if (key === 'autoWipe') return;
         for (const it of this.items) if (it.media !== 'image' && it.status === 'ready') this.updateCard(it);
         void this.rerenderAll();
@@ -326,26 +351,59 @@ export class App {
     );
     this.bindDrop(hero);
 
-    const options = h(
-      'section',
-      { className: 'panel options' },
-      h('p', { className: 'group' }, t.groupCover),
+    // All switches live in a sheet; the page shows only the protection level and what is on.
+    const settings = h(
+      'dialog',
+      { className: 'settings-sheet', 'data-testid': 'settings', 'aria-labelledby': 'settings-title' },
       h(
         'div',
-        { className: 'chips' },
-        chip('faces', t.optFaces, ICONS.face),
-        chip('plates', t.optPlates, ICONS.car),
-        chip('text', t.optText, ICONS.text),
-        chip('people', t.optPeople, ICONS.person),
+        { className: 'sheet-head' },
+        h('h2', { id: 'settings-title' }, t.settingsTitle),
+        h('button', { type: 'button', className: 'btn primary small', 'data-testid': 'settings-done', onclick: () => settings.close() }, t.settingsDone),
       ),
-      h('p', { className: 'group' }, t.groupStyle),
-      this.stylePicker(),
-      h('p', { className: 'group' }, t.groupSoundAll),
-      h('div', { className: 'chips' }, chip('voice', t.optVoice, ICONS.mic), chip('mute', t.optMute, ICONS.muteIcon)),
-      h('p', { className: 'group' }, t.groupMore),
-      h('div', { className: 'chips' }, chip('light', t.optLight, ICONS.feather), chip('extra', t.optExtra, ICONS.shield), chip('autoWipe', t.optAutoWipe, ICONS.timer)),
-      h('p', { className: 'hint small' }, t.extraHint),
+      h(
+        'div',
+        { className: 'options' },
+        h('p', { className: 'group' }, t.protectTitle),
+        this.presetPicker(),
+        h('p', { className: 'group' }, t.groupCover),
+        h(
+          'div',
+          { className: 'chips' },
+          chip('faces', t.optFaces, ICONS.face),
+          chip('plates', t.optPlates, ICONS.car),
+          chip('text', t.optText, ICONS.text),
+          chip('people', t.optPeople, ICONS.person),
+        ),
+        h('p', { className: 'group' }, t.groupStyle),
+        this.stylePicker(),
+        h('p', { className: 'group' }, t.groupSoundAll),
+        h('div', { className: 'chips' }, chip('voice', t.optVoice, ICONS.mic), chip('mute', t.optMute, ICONS.muteIcon)),
+        h('p', { className: 'group' }, t.groupMore),
+        h('div', { className: 'chips' }, chip('light', t.optLight, ICONS.feather), chip('extra', t.optExtra, ICONS.shield), chip('autoWipe', t.optAutoWipe, ICONS.timer)),
+        h('p', { className: 'hint small' }, t.extraHint),
+      ),
     );
+    // Tapping the dimmed area outside the sheet closes it.
+    settings.addEventListener('click', (e) => {
+      if (e.target === settings) settings.close();
+    });
+    settings.addEventListener('close', () => this.refreshProtection());
+    this.settingsEl = settings;
+    const openSettings = h('button', { type: 'button', className: 'btn small', 'data-testid': 'open-settings' }, icon(ICONS.edit, 16), t.openSettings);
+    openSettings.addEventListener('click', () => {
+      // Each switch reflects the current settings (a preset may have changed several).
+      this.syncSettingsSheet();
+      settings.showModal();
+    });
+    this.protectEl = h('div', { className: 'protect-summary', 'data-testid': 'protect-summary' });
+    const protect = h(
+      'section',
+      { className: 'protect' },
+      h('div', { className: 'protect-head' }, h('span', { className: 'protect-icon' }, icon(ICONS.shield, 20)), h('p', { className: 'protect-title' }, t.protectTitle), openSettings),
+      this.protectEl,
+    );
+    this.refreshProtection();
 
     append(
       this.root,
@@ -363,9 +421,10 @@ export class App {
       ),
       this.introCard(standalone),
       hero,
+      protect,
       this.bulkEl,
       this.listEl,
-      options,
+      settings,
       h('details', { className: 'info' }, h('summary', {}, t.howTitle), h('ul', {}, ...t.how.map((x) => h('li', {}, x)))),
       h('details', { className: 'info' }, h('summary', {}, t.limitsTitle), h('ul', {}, ...t.limits.map((x) => h('li', {}, x)))),
       h('label', { className: 'link open-sealed' }, sealedInput, t.openSealedLink),
@@ -379,6 +438,10 @@ export class App {
       this.toastEl,
     );
     this.updateBulk();
+    if (sheetWasOpen) {
+      this.syncSettingsSheet();
+      settings.showModal();
+    }
   }
 
   private toastEl: HTMLElement | undefined;
@@ -436,6 +499,9 @@ export class App {
    * For when the phone may be taken; also run by "auto-forget".
    */
   wipeAll(): void {
+    // Close anything showing an original first (the cover editor, passphrase sheets, settings).
+    for (const close of [...openViews]) close();
+    this.settingsEl?.close();
     for (const item of this.items) {
       item.abort?.abort();
       if (item.output) URL.revokeObjectURL(item.output.url);
@@ -469,6 +535,53 @@ export class App {
     });
   }
 
+  private settingsEl: HTMLDialogElement | undefined;
+  /** Cards whose "More" actions are shown, and whose list of leaks was opened or closed by the user. */
+  private readonly moreOpen = new Set<number>();
+  private readonly findingsOpen = new Map<number, boolean>();
+  private protectEl: HTMLElement | undefined;
+
+  /** The protection level and the switches that are on, in one line under the picker. */
+  private refreshProtection(): void {
+    const el = this.protectEl;
+    if (!el) return;
+    const t = this.t;
+    clear(el);
+    const preset = presetOf(this.settings);
+    el.appendChild(h('p', { className: 'protect-level', 'data-preset': preset }, h('strong', {}, t.presets[preset].name), ' · ', t.presets[preset].text));
+    const on = SUMMARY_KEYS.filter((k) => this.settings[k]).map((k) => t.summaryNames[k]);
+    el.appendChild(h('p', { className: 'protect-on' }, t.summaryOn(on.join(t.listJoin)), ' · ', t.styleNames[this.settings.maskStyle]));
+    for (const r of this.settingsEl?.querySelectorAll<HTMLInputElement>('input[name="preset"]') ?? []) r.checked = r.value === preset;
+  }
+
+  /** Makes every switch in the settings sheet show the current settings. */
+  private syncSettingsSheet(): void {
+    for (const box of this.settingsEl?.querySelectorAll<HTMLInputElement>('input[data-testid^="opt-"]') ?? []) {
+      const key = box.dataset.testid!.slice(4) as keyof Settings;
+      box.checked = this.settings[key] === true;
+    }
+    this.refreshProtection();
+  }
+
+  /** Standard, strong or maximum: sets the cover and sound switches at once. */
+  private presetPicker(): HTMLElement {
+    const t = this.t;
+    const row = h('div', { className: 'presets', role: 'radiogroup', 'aria-label': t.protectTitle });
+    for (const p of ['standard', 'strong', 'max'] as const) {
+      const input = h('input', { type: 'radio', name: 'preset', value: p, checked: presetOf(this.settings) === p, 'data-testid': `preset-${p}` });
+      input.addEventListener('change', () => {
+        if (!input.checked) return;
+        Object.assign(this.settings, PRESETS[p]);
+        saveSettings(this.settings);
+        this.syncSettingsSheet();
+        for (const it of this.items) if (it.media !== 'image' && it.status === 'ready') this.updateCard(it);
+        void this.rerenderAll();
+      });
+      row.appendChild(h('label', { className: `preset preset-${p}` }, input, h('span', { className: 'preset-name' }, t.presets[p].name), h('span', { className: 'preset-text' }, t.presets[p].text)));
+    }
+    return row;
+  }
+
   /** Three small swatches to choose how covers look. */
   private stylePicker(): HTMLElement {
     const t = this.t;
@@ -479,6 +592,7 @@ export class App {
         if (!input.checked) return;
         this.settings.maskStyle = style;
         saveSettings(this.settings);
+        this.refreshProtection();
         for (const it of this.items) if (it.media === 'video' && it.status === 'ready') this.updateCard(it);
         void this.rerenderAll();
       });
@@ -552,6 +666,12 @@ export class App {
       item.status = 'cleaning';
       this.updateCard(item);
       await renderImage(item, this.settings);
+      if (!this.items.includes(item)) {
+        // Wiped or removed while this copy was being made: forget it.
+        if (item.output) URL.revokeObjectURL(item.output.url);
+        delete item.output;
+        return;
+      }
       item.status = 'ready';
     } catch (e) {
       console.error(e);
@@ -612,6 +732,7 @@ export class App {
         tooLarge: t.errTooLarge,
         leftovers: t.errLeftovers,
         video: t.errVideo,
+        audio: t.errAudio,
         videoMask: t.errVideoMask,
         voice: t.errVoice,
         cancelled: t.errCancelled,
@@ -673,6 +794,8 @@ export class App {
       );
       if (item.media === 'audio') {
         body.appendChild(h('p', { className: 'note', 'data-testid': 'audio-voice-note' }, item.audioVoiced ? t.audioVoiced : t.audioKeptVoice));
+        if (item.audioVoiced && this.settings.mute && !this.settings.voice) body.appendChild(h('p', { className: 'note', 'data-testid': 'audio-mute-note' }, t.audioMuteMeansVoice));
+        if (item.droppedPicture) body.appendChild(h('p', { className: 'warn', 'data-testid': 'audio-picture-note' }, t.audioPictureDropped));
         if (!upToDate(item, this.settings)) body.appendChild(this.rebuildButton(item, t.rebuildAudio));
       } else if (item.media === 'image') {
         // Count from the options this copy was really made with.
@@ -691,7 +814,7 @@ export class App {
         }
         if (item.detectFailed) body.appendChild(h('p', { className: 'warn' }, t.errDetect));
         if (used.extra) body.appendChild(h('p', { className: 'note', 'data-testid': 'extra-note' }, t.extraApplied));
-        body.appendChild(h('p', { className: 'note' }, t.checkPicture));
+        body.appendChild(h('p', { className: 'note' }, t.checkShort));
       } else {
         // Say exactly what this video was made with.
         const made = item.videoMadeWith;
@@ -905,6 +1028,18 @@ export class App {
     }
     const save = h('a', { className: 'btn', href: out.url, download: out.name, 'data-testid': 'save' }, icon(ICONS.save), t.save);
     row.appendChild(save);
+    // Less frequent actions wait behind "More", so the card stays calm.
+    // Stays open across card refreshes (a background check may redraw the card at any time).
+    const isOpen = this.moreOpen.has(item.id);
+    const more = h('div', { className: 'more-row', hidden: !isOpen });
+    const moreBtn = h('button', { type: 'button', className: `btn ghost${isOpen ? ' open' : ''}`, 'data-testid': 'more-actions', 'aria-expanded': String(isOpen) }, t.moreActions);
+    moreBtn.addEventListener('click', () => {
+      more.hidden = !more.hidden;
+      if (more.hidden) this.moreOpen.delete(item.id);
+      else this.moreOpen.add(item.id);
+      moreBtn.setAttribute('aria-expanded', String(!more.hidden));
+      moreBtn.classList.toggle('open', !more.hidden);
+    });
     const sealBtn = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'seal' }, icon(ICONS.lock), t.sealOriginal);
     sealBtn.addEventListener('click', async () => {
       if (item.file.size > MAX_SEAL_BYTES) {
@@ -920,7 +1055,7 @@ export class App {
       this.updateCard(item);
       await shareOrSave([r.file], true);
     });
-    row.appendChild(sealBtn);
+    more.appendChild(sealBtn);
     if (item.media === 'image' && item.decoded) {
       const edit = h('button', { type: 'button', className: 'btn ghost', 'data-testid': 'edit' }, icon(ICONS.edit), t.editMasks);
       edit.addEventListener('click', async () => {
@@ -939,10 +1074,12 @@ export class App {
           item.manual.push(rect);
           await this.refresh(item, true);
         });
+        // A phone screenshot: these are likely needed, so they stay in view.
         row.appendChild(cover);
       }
     }
-    return row;
+    row.appendChild(moreBtn);
+    return h('div', {}, row, more);
   }
 
   private findingsView(item: Item): HTMLElement {
@@ -953,9 +1090,18 @@ export class App {
       box.appendChild(h('p', { className: 'note' }, t.revealedNone));
       return box;
     }
-    box.appendChild(h('p', { className: 'findings-title' }, t.revealedTitle));
     const order = { high: 0, medium: 1, low: 2 } as const;
     const sorted = [...item.findings].sort((a, b) => order[a.severity] - order[b.severity]);
+    // Folded: one line says how much the file was revealing and the most serious thing; details on a tap.
+    const kinds = new Set(sorted.map((f) => f.id));
+    const top = sorted[0]?.severity === 'high' ? t.findings[sorted[0].id] : '';
+    // Opened by itself when there are signs of editing: for a received photo, that is the point of looking.
+    const details = h('details', { className: 'findings-details', 'data-testid': 'findings-details', open: this.findingsOpen.get(item.id) ?? item.hints.length > 0 });
+    details.addEventListener('toggle', () => this.findingsOpen.set(item.id, details.open));
+    details.appendChild(h('summary', { className: 'findings-title', 'data-testid': 'findings-toggle' }, t.findingsSummary(formatNumber(lang, kinds.size), top)));
+    box.appendChild(details);
+    const inner = h('div', {});
+    details.appendChild(inner);
     const list = h('ul', {});
     // One row per kind of leak; several values of the same kind are shown together.
     const groups = new Map<string, Finding[]>();
@@ -971,16 +1117,16 @@ export class App {
       if (values.length) merged.value = values.join(' · ');
       list.appendChild(this.findingRow(merged, lang));
     }
-    box.appendChild(list);
+    inner.appendChild(list);
     if (item.hints.length) {
-      box.appendChild(h('p', { className: 'findings-title hints-title' }, t.hintsTitle));
+      inner.appendChild(h('p', { className: 'findings-title hints-title' }, t.hintsTitle));
       const hl = h('ul', { 'data-testid': 'hints' });
       for (const x of item.hints) {
         const li = h('li', { className: 'sev-low', 'data-hint': x.id }, h('span', { className: 'label' }, t.hints[x.id]));
         if (x.value) li.appendChild(h('span', { className: 'value', dir: 'auto' }, x.value));
         hl.appendChild(li);
       }
-      box.appendChild(hl);
+      inner.appendChild(hl);
     }
     if (item.partial) box.appendChild(h('p', { className: 'note' }, t.partialNote));
     if (item.status === 'ready') box.appendChild(h('p', { className: 'removed' }, icon(ICONS.check, 16), t.removedNote));
@@ -1033,10 +1179,9 @@ export class App {
     const zip = h('button', { type: 'button', className: 'btn wide', 'data-testid': 'save-zip' }, icon(ICONS.zip), `${this.t.saveZip} (${n})`);
     zip.addEventListener('click', async () => {
       const { makeZip } = await import('../lib/zip');
-      const entries = await Promise.all(ready.map(async (i) => ({ name: i.output!.name, data: new Uint8Array(await i.output!.blob.arrayBuffer()) })));
       let blob: Blob;
       try {
-        blob = makeZip(entries);
+        blob = await makeZip(ready.map((i) => ({ name: i.output!.name, data: i.output!.blob })));
       } catch (e) {
         console.error(e);
         alert(this.t.errTooLarge);

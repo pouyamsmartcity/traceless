@@ -213,6 +213,9 @@ def make_audio():
          os.path.join(OUT, 'voice-note.mp3')])
     run(['ffmpeg', '-v', 'error', '-y', *tone, '-c:a', 'libopus', '-b:a', '32k', *tags,
          os.path.join(OUT, 'voice-note.ogg')])
+    # A voice note saved as an .mp4 "video" that holds only sound (some recorders and browsers do this).
+    run(['ffmpeg', '-v', 'error', '-y', *tone, '-c:a', 'aac', '-b:a', '48k', *tags,
+         os.path.join(OUT, 'voice-only.mp4')])
     os.remove(cover)
 
 

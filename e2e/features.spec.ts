@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openFindings, openMore, setOpt, setStyle } from './ui';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { sourceFromBytes } from '../src/lib/bytes';
 import { inspectVideo } from '../src/lib/bmff';
@@ -62,7 +64,7 @@ test.describe('Pakkon: new features', () => {
 
   test('changes the voice in a voice note when asked', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-voice').check();
+    await setOpt(page, 'voice', true);
     await page.getByTestId('file-input').setInputFiles(fixture('leaky/voice-note.ogg'));
     const item = await readyItem(page);
     await expect(item.getByTestId('report')).toContainText('صدا تغییر کرد');
@@ -70,8 +72,74 @@ test.describe('Pakkon: new features', () => {
     expect(hz).toBeGreaterThan(220 * (VOICE_MIN - VOICE_DRIFT) * 0.97);
     expect(hz).toBeLessThan(220 * (VOICE_MIN + VOICE_SPAN + VOICE_DRIFT) * 1.03);
     // Switching the voice change off offers to make it again.
-    await page.getByTestId('opt-voice').uncheck();
+    await setOpt(page, 'voice', false);
     await expect(item.getByTestId('rebuild')).toBeVisible();
+  });
+
+  test('a damaged voice memo is refused quickly and does not hold up the next file', async ({ page }) => {
+    await page.goto('/');
+    // Break the sample table (samples per chunk = 2^30), which once made the decoder spin for minutes.
+    const bytes = readFileSync(fixture('leaky/voice-memo.m4a'));
+    const at = bytes.indexOf(Buffer.from('stsc'));
+    bytes.writeUInt32BE(0x40000000, at + 4 + 4 + 4 + 4);
+    await page.getByTestId('file-input').setInputFiles({ name: 'broken.m4a', mimeType: 'audio/mp4', buffer: bytes });
+    await expect(page.getByTestId('item').first().getByTestId('item-error')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
+    await readyItem(page, 0);
+  });
+
+  test('a voice note inside an .mp4 "video" with no picture is cleaned as a recording', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('file-input').setInputFiles(fixture('leaky/voice-only.mp4'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('save')).toHaveAttribute('download', /^rec-[a-z0-9]+\.m4a$/);
+    const text = new TextDecoder('latin1').decode(await bytesOf(page, await item.getByTestId('save').getAttribute('href')));
+    for (const leak of ['Enghelab', 'Reza', 'FakeRecorder']) expect(text).not.toContain(leak);
+  });
+
+  test('"remove the sound" changes the voice of a voice note instead of leaving it empty', async ({ page }) => {
+    await page.goto('/');
+    await setOpt(page, 'mute', true);
+    await page.getByTestId('file-input').setInputFiles(fixture('leaky/voice-note.ogg'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('audio-mute-note')).toBeVisible();
+    const hz = await toneHz(page, await item.getByTestId('save').getAttribute('href'));
+    expect(hz).toBeLessThan(220 * 0.92);
+  });
+
+  test('auto-forget also closes the cover editor, which shows the original', async ({ page }) => {
+    await page.clock.install();
+    await page.goto('/');
+    await setOpt(page, 'autoWipe', true);
+    await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
+    const item = await readyItem(page);
+    await item.getByTestId('edit').click();
+    await expect(page.locator('.editor')).toBeVisible();
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.clock.runFor(5 * 60 * 1000 + 100);
+    await expect(page.locator('.editor')).toHaveCount(0);
+    await expect(page.getByTestId('item')).toHaveCount(0);
+  });
+
+  test('protection levels set several switches at once; the page shows what is on', async ({ page }) => {
+    await page.goto('/');
+    const summary = page.getByTestId('protect-summary');
+    await expect(summary.locator('[data-preset]')).toHaveAttribute('data-preset', 'standard');
+    await page.getByTestId('open-settings').click();
+    await page.getByTestId('preset-max').check();
+    for (const k of ['faces', 'plates', 'text', 'people', 'mute', 'extra']) await expect(page.getByTestId(`opt-${k}`)).toBeChecked();
+    await expect(page.getByTestId('opt-voice')).not.toBeChecked();
+    await page.getByTestId('settings-done').click();
+    await expect(summary.locator('[data-preset]')).toHaveAttribute('data-preset', 'max');
+    await expect(summary).toContainText('کل آدم‌ها');
+    // Changing one switch makes it "custom"; the choice is remembered.
+    await setOpt(page, 'people', false);
+    await expect(summary.locator('[data-preset]')).toHaveAttribute('data-preset', 'custom');
+    await page.reload();
+    await expect(summary.locator('[data-preset]')).toHaveAttribute('data-preset', 'custom');
   });
 
   test('a summary shows what was removed and covered', async ({ page }) => {
@@ -109,7 +177,7 @@ test.describe('Pakkon: new features', () => {
 
   test('sticker look: faces become a smiling yellow sticker, still solid', async ({ page }) => {
     await page.goto('/');
-    await page.locator('label.style-sticker').click();
+    await setStyle(page, 'sticker');
     await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut.png'));
     const item = await readyItem(page);
     const href = await item.getByTestId('save').getAttribute('href');
@@ -133,7 +201,7 @@ test.describe('Pakkon: new features', () => {
 
   test('smaller files: a big photo is made at most 1600 pixels wide', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-light').check();
+    await setOpt(page, 'light', true);
     const big = await page.evaluate(async () => {
       const c = document.createElement('canvas');
       c.width = 3200;
@@ -158,7 +226,7 @@ test.describe('Pakkon: new features', () => {
 
   test('smaller files: a big video is made at most 1280 pixels wide, still with covers', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-light').check();
+    await setOpt(page, 'light', true);
     // A 1920 x 1080 video with a face in the middle.
     await page.getByTestId('file-input').setInputFiles(fixture('real/astronaut-1080.mp4'));
     const item = await readyItem(page);
@@ -211,7 +279,7 @@ test.describe('Pakkon: new features', () => {
   test('auto-forget: everything is wiped after five minutes in the background', async ({ page }) => {
     await page.clock.install();
     await page.goto('/');
-    await page.getByTestId('opt-autoWipe').check();
+    await setOpt(page, 'autoWipe', true);
     await page.getByTestId('file-input').setInputFiles(fixture('leaky/voice-note.ogg'));
     await readyItem(page);
     const setVisibility = (state: 'hidden' | 'visible') =>

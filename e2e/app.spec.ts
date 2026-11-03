@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openFindings, openMore, setOpt, setStyle } from './ui';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -134,6 +135,7 @@ test.describe('Pakkon', () => {
     await addFile(page, fixture('leaky/photo-everything.jpg'));
     const item = await readyItem(page);
     const findings = item.getByTestId('findings');
+    await openFindings(item);
     for (const id of ['gps', 'deviceModel', 'serialNumber', 'owner', 'thumbnail', 'contentCredentials', 'motionPhoto', 'editHistory']) {
       await expect(findings.locator(`[data-finding="${id}"]`).first()).toBeVisible();
     }
@@ -198,18 +200,18 @@ test.describe('Pakkon', () => {
     await page.goto('/');
     await addFile(page, fixture('real/astronaut.png'));
     await readyItem(page);
-    await page.getByTestId('opt-faces').uncheck();
+    await setOpt(page, 'faces', false);
     await readyItem(page);
     await expect(page.getByTestId('mask-summary')).toContainText('۰ صورت');
     expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).max).toBeGreaterThan(40);
-    await page.getByTestId('opt-faces').check();
+    await setOpt(page, 'faces', true);
     await readyItem(page);
     expect((await regionColor(page, { x: 195, y: 80, w: 60, h: 80 })).spread).toBeLessThan(6);
   });
 
   test('extra protection makes a smaller, slightly turned copy and still covers the face', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-extra').check();
+    await setOpt(page, 'extra', true);
     await addFile(page, fixture('real/astronaut.png'));
     const item = await readyItem(page);
     await expect(item.getByTestId('extra-note')).toBeVisible();
@@ -238,6 +240,7 @@ test.describe('Pakkon', () => {
     expect(finalUrl).toContain('?shared=1');
     await page.goto('/?shared=1');
     const item = await readyItem(page);
+    await openFindings(item);
     await expect(item.getByTestId('findings').locator('[data-finding="gps"]').first()).toBeVisible();
     const { name } = await outputBytes(page);
     expect(name).not.toContain('IMG_2026');
@@ -256,7 +259,7 @@ test.describe('Pakkon', () => {
 
   test('covers text when asked, and a cover can be removed with one tap', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-text').check();
+    await setOpt(page, 'text', true);
     await addFile(page, fixture('real/iran-truck.png'));
     const item = await readyItem(page);
     await expect(item.getByTestId('mask-summary')).toContainText('نوشته');
@@ -301,10 +304,10 @@ test.describe('Pakkon', () => {
     await page.goto('/');
     await addFile(page, fixture('real/astronaut.png'));
     await readyItem(page);
-    await page.getByTestId('opt-faces').uncheck();
-    await page.getByTestId('opt-faces').check();
-    await page.getByTestId('opt-extra').check();
-    await page.getByTestId('opt-extra').uncheck();
+    await setOpt(page, 'faces', false);
+    await setOpt(page, 'faces', true);
+    await setOpt(page, 'extra', true);
+    await setOpt(page, 'extra', false);
     await readyItem(page);
     await page.waitForTimeout(1500);
     await readyItem(page);
@@ -317,8 +320,8 @@ test.describe('Pakkon', () => {
 
   test('offers to cover the status bar of a phone screenshot', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-faces').uncheck();
-    await page.getByTestId('opt-plates').uncheck();
+    await setOpt(page, 'faces', false);
+    await setOpt(page, 'plates', false);
     await addFile(page, fixture('real/phone-screenshot.png'));
     const item = await readyItem(page);
     expect((await regionColor(page, { x: 100, y: 20, w: 300, h: 50 })).max).toBeGreaterThan(200); // status text visible
@@ -338,13 +341,13 @@ test.describe('Pakkon', () => {
 
   test('warns that uncovered signs, writing or plates may reveal the place', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-plates').uncheck();
+    await setOpt(page, 'plates', false);
     await addFile(page, fixture('real/iran-truck.png'));
     const item = await readyItem(page);
     await expect(item.getByTestId('location-risk')).toContainText('نوشته');
     await expect(item.getByTestId('location-risk')).toContainText('پلاک');
-    await page.getByTestId('opt-plates').check();
-    await page.getByTestId('opt-text').check();
+    await setOpt(page, 'plates', true);
+    await setOpt(page, 'text', true);
     await readyItem(page);
     await expect(item.getByTestId('mask-summary')).toContainText('نوشته');
     await expect(item.getByTestId('location-risk')).toHaveCount(0);
@@ -384,6 +387,7 @@ test.describe('Pakkon', () => {
     await page.goto('/');
     await addFile(page, fixture('leaky/photo-everything.jpg'));
     const item = await readyItem(page);
+    await openMore(item);
     await item.getByTestId('seal').click();
     await page.getByTestId('passphrase').fill('correct horse battery');
     await page.getByTestId('passphrase-confirm').fill('correct horse batteri');
@@ -422,8 +426,8 @@ test.describe('Pakkon', () => {
 
   test('offers to cover the chat header (contact name and picture) of a screenshot', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-faces').uncheck();
-    await page.getByTestId('opt-plates').uncheck();
+    await setOpt(page, 'faces', false);
+    await setOpt(page, 'plates', false);
     await addFile(page, fixture('real/phone-screenshot.png'));
     const item = await readyItem(page);
     await item.getByTestId('cover-chat-header').click();
@@ -441,7 +445,7 @@ test.describe('Pakkon', () => {
     const item = await readyItem(page);
     // Body visible before; reference person box x 11-368, y 20-507.
     expect((await regionColor(page, { x: 200, y: 380, w: 60, h: 60 })).max).toBeGreaterThan(60);
-    await page.getByTestId('opt-people').check();
+    await setOpt(page, 'people', true);
     await readyItem(page);
     await expect(item.getByTestId('mask-summary')).toContainText('آدم');
     expect((await regionColor(page, { x: 200, y: 380, w: 60, h: 60 })).spread).toBeLessThan(6);
@@ -459,13 +463,13 @@ test.describe('Pakkon', () => {
     let c = await regionColor(page, face);
     expect(c.spread).toBeLessThan(6);
     expect(c.max).toBeGreaterThan(30); // smart: a colour from the surroundings, not black
-    await page.locator('label.style-black').click();
+    await setStyle(page, 'black');
     await readyItem(page);
     await page.waitForTimeout(500);
     await readyItem(page);
     c = await regionColor(page, face);
     expect(c.max).toBeLessThan(8);
-    await page.locator('label.style-brand').click();
+    await setStyle(page, 'brand');
     await readyItem(page);
     await page.waitForTimeout(500);
     await readyItem(page);
@@ -501,6 +505,7 @@ test.describe('Pakkon', () => {
     await page.goto('/');
     await addFile(page, fixture('leaky/video-location.mov'));
     const item = await readyItem(page);
+    await openFindings(item);
     await expect(item.getByTestId('findings').locator('[data-finding="videoLocation"]').first()).toBeVisible();
     const { bytes, name } = await outputBytes(page);
     expect(name).toMatch(/^vid-[a-z0-9]{6}\.mp4$/);
@@ -550,14 +555,14 @@ test.describe('Pakkon', () => {
 
   test('removes the sound from a video when asked, and offers to remake it after a change', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-mute').check();
+    await setOpt(page, 'mute', true);
     await addFile(page, fixture('real/astronaut-pan.mp4'));
     const item = await readyItem(page);
     await expect(item.getByTestId('muted-note')).toBeVisible();
     const { bytes } = await outputBytes(page);
     expect((await inspectVideo(sourceFromBytes(bytes))).tracks).toEqual(['vide']);
     await expect(item.getByTestId('rebuild')).toHaveCount(0);
-    await page.getByTestId('opt-mute').uncheck();
+    await setOpt(page, 'mute', false);
     await item.getByTestId('rebuild').click();
     await readyItem(page);
     await expect(item.getByTestId('muted-note')).toHaveCount(0);
@@ -567,7 +572,7 @@ test.describe('Pakkon', () => {
 
   test('covers text in a video when asked', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-text').check();
+    await setOpt(page, 'text', true);
     await addFile(page, fixture('real/iran-truck.mp4'));
     const item = await readyItem(page);
     await expect(item.getByTestId('video-masks')).toHaveAttribute('data-state', 'covered');
@@ -579,7 +584,7 @@ test.describe('Pakkon', () => {
 
   test('changes voices in a video: the sound is kept but its pitch is lower', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-voice').check();
+    await setOpt(page, 'voice', true);
     await addFile(page, fixture('real/astronaut-pan.mp4'));
     const item = await readyItem(page);
     await expect(item.getByTestId('voice-note')).toBeVisible();
@@ -609,9 +614,9 @@ test.describe('Pakkon', () => {
       Object.defineProperty(window, 'AudioEncoder', { value: undefined });
     });
     await page.goto('/');
-    await page.getByTestId('opt-voice').check();
-    await page.getByTestId('opt-faces').uncheck();
-    await page.getByTestId('opt-plates').uncheck();
+    await setOpt(page, 'voice', true);
+    await setOpt(page, 'faces', false);
+    await setOpt(page, 'plates', false);
     await addFile(page, fixture('real/astronaut-pan.mp4'));
     const item = page.getByTestId('item').first();
     await expect(item.getByTestId('voice-mute')).toBeVisible({ timeout: 60_000 });
@@ -625,11 +630,11 @@ test.describe('Pakkon', () => {
 
   test('switching faces on while a video is being made: the note tells the truth and offers a remake', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-faces').uncheck();
+    await setOpt(page, 'faces', false);
     await addFile(page, fixture('real/astronaut-pan.mp4'));
     const item = page.getByTestId('item').first();
     await expect(item.getByTestId('item-status')).toHaveAttribute('class', /detecting|cleaning/, { timeout: 30_000 });
-    await page.getByTestId('opt-faces').check();
+    await setOpt(page, 'faces', true);
     await readyItem(page);
     // Made without faces covered: the card says so and offers to make it again.
     await expect(item.getByTestId('video-uncovered')).toContainText('صورت');
@@ -644,7 +649,7 @@ test.describe('Pakkon', () => {
 
   test('covers whole people in a video when asked', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-people').check();
+    await setOpt(page, 'people', true);
     await addFile(page, fixture('real/astronaut-pan.mp4'));
     const item = await readyItem(page);
     await expect(item.getByTestId('video-masks')).toContainText('کل آدم‌ها');
@@ -656,8 +661,8 @@ test.describe('Pakkon', () => {
 
   test('with covering switched off, a video is only re-packaged', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('opt-faces').uncheck();
-    await page.getByTestId('opt-plates').uncheck();
+    await setOpt(page, 'faces', false);
+    await setOpt(page, 'plates', false);
     await addFile(page, fixture('real/astronaut-pan.mp4'));
     const item = await readyItem(page);
     await expect(item.getByTestId('video-masks')).toHaveAttribute('data-state', 'off');

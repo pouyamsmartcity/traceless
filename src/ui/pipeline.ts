@@ -11,7 +11,7 @@ import { isAudioFile } from '../lib/media-kind';
 import { tick, type PhaseClock } from '../lib/eta';
 
 export type ItemStatus = 'queued' | 'reading' | 'detecting' | 'cleaning' | 'ready' | 'error';
-export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'videoMask' | 'voice' | 'cancelled' | 'generic';
+export type ErrorKind = 'unsupported' | 'tooLarge' | 'leftovers' | 'video' | 'audio' | 'videoMask' | 'voice' | 'cancelled' | 'generic';
 
 export interface Item {
   id: number;
@@ -43,6 +43,8 @@ export interface Item {
   audioVoiced?: boolean;
   /** Recording: made with the light option. */
   audioLight?: boolean;
+  /** Recording: the file also had a picture, which was left out. */
+  droppedPicture?: boolean;
   /** Video: made smaller (light option) — false when this device could not re-encode it. */
   lightApplied?: boolean;
   /** Video: what happened to faces and plates. */
@@ -272,8 +274,9 @@ export function effectiveVideoOptions(item: Item, o: Options): VideoOptions {
 
 /** Whether a finished copy still matches the switches (photos are remade by themselves when they change). */
 export function upToDate(item: Item, o: Options): boolean {
-  if (item.media === 'image') return true;
-  if (item.media === 'audio') return item.audioVoiced === (item.soundOverride !== 'keep' && o.voice) && item.audioLight === o.light;
+  // Photos are made again by themselves; until then, a copy made with other switches is not offered in bulk.
+  if (item.media === 'image') return sameOptions(item.renderedWith, o);
+  if (item.media === 'audio') return item.audioVoiced === audioVoice(item, o) && item.audioLight === o.light;
   return sameVideoOptions(item, o);
 }
 
@@ -311,6 +314,49 @@ export function coveringRequested(opts: Options): boolean {
   return opts.faces || opts.plates || opts.text || opts.people;
 }
 
+/** Whether a video file has a picture track (files the browser cannot read count as having one). */
+async function hasPicture(file: File): Promise<boolean> {
+  const { ALL_FORMATS, BlobSource, Input } = await import('mediabunny');
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  try {
+    const video = await input.getPrimaryVideoTrack();
+    const audio = await input.getPrimaryAudioTrack();
+    return !!video || !audio;
+  } catch {
+    return true;
+  } finally {
+    input.dispose();
+  }
+}
+
+/** Voice note or recording: a fresh M4A with nothing but the sound (voice changed when asked). */
+async function processAudio(item: Item, opts: Options, set: (status: ItemStatus, progress?: number, step?: string) => void): Promise<void> {
+  if (item.file.size > MAX_VIDEO_BYTES) throw new RangeError('recording larger than 2 GB');
+  const voice = audioVoice(item, opts);
+  const { cleanAudio } = await import('../lib/clean-audio');
+  item.abort = new AbortController();
+  try {
+    set('cleaning', 0);
+    const r = await cleanAudio(item.file, { voice, light: opts.light, signal: item.abort.signal, onProgress: (p) => set('cleaning', p) });
+    item.findings = r.findings;
+    item.audioVoiced = voice;
+    item.audioLight = opts.light;
+    item.droppedPicture = r.droppedPicture;
+    setOutput(item, new Blob([r.bytes as BlobPart], { type: r.type }), 'm4a');
+    item.output!.name = item.output!.name.replace(/^img-/, 'rec-');
+  } finally {
+    delete item.abort;
+  }
+}
+
+/**
+ * Whether a recording's voice is changed. "Remove the sound" would leave a voice note empty, so for recordings
+ * it means the strongest thing that keeps the words: the voice change.
+ */
+export function audioVoice(item: Item, o: Options): boolean {
+  return item.soundOverride !== 'keep' && (o.voice || o.mute);
+}
+
 export async function processItem(item: Item, liveOpts: Options, detector: Detector, update: () => void): Promise<void> {
   // Use the options as they were when processing started: switches changed meanwhile are handled
   // afterwards (photos are remade, videos offer "make again"), so notes always match the delivered file.
@@ -330,19 +376,16 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
   try {
     set('reading');
     if (item.media === 'audio') {
-      if (item.file.size > MAX_VIDEO_BYTES) throw new RangeError('recording larger than 2 GB');
-      // A voice change can be undone in part by someone who tries; the card says so.
-      const voice = item.soundOverride !== 'keep' && opts.voice;
-      const { cleanAudio } = await import('../lib/clean-audio');
-      set('cleaning', 0);
-      const r = await cleanAudio(item.file, { voice, light: opts.light, onProgress: (p) => set('cleaning', p) });
-      item.audioLight = opts.light;
-      item.findings = r.findings;
-      item.audioVoiced = voice;
-      setOutput(item, new Blob([r.bytes as BlobPart], { type: r.type }), 'm4a');
-      item.output!.name = item.output!.name.replace(/^img-/, 'rec-');
+      await processAudio(item, opts, set);
     } else if (item.media === 'video') {
       if (item.file.size > MAX_VIDEO_BYTES) throw new RangeError('video larger than 2 GB');
+      // A "video" file with sound only (a voice note saved as .mp4 or .webm) is handled as a recording.
+      if (!(await hasPicture(item.file))) {
+        item.media = 'audio';
+        await processAudio(item, opts, set);
+        set('ready');
+        return;
+      }
       const inspection = await inspectVideo(sourceFromBlob(item.file));
       item.findings = inspection.findings;
       item.partial = inspection.partial;
@@ -434,6 +477,7 @@ export async function processItem(item: Item, liveOpts: Options, detector: Detec
   } catch (e) {
     console.error(e);
     item.error = errorKind(e);
+    if (item.error === 'video' && item.media === 'audio') item.error = 'audio';
     item.errorDetail = (e instanceof Error ? `${e.name}: ${e.message}` : String(e)).slice(0, 300);
     set('error');
   }

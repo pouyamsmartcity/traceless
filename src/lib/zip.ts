@@ -24,14 +24,27 @@ export const MAX_ZIP_BYTES = 0xfffffff0;
 
 export interface ZipEntry {
   name: string;
-  data: Uint8Array;
+  /** The file's bytes; a Blob is read piece by piece, so big videos are not held in memory twice. */
+  data: Uint8Array | Blob;
+}
+
+/** CRC-32 of a Blob, reading it in pieces. */
+async function crcOf(data: Uint8Array | Blob): Promise<number> {
+  if (data instanceof Uint8Array) return crc32(data);
+  let crc = 0;
+  const reader = data.stream().getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return crc;
+    crc = crc32(value, crc);
+  }
 }
 
 /** DOS date for 1980-01-01 00:00. */
 const DOS_DATE = (0 << 9) | (1 << 5) | 1;
 const DOS_TIME = 0;
 
-export function makeZip(entries: ZipEntry[]): Blob {
+export async function makeZip(entries: ZipEntry[]): Promise<Blob> {
   const enc = new TextEncoder();
   const parts: BlobPart[] = [];
   const central: Uint8Array[] = [];
@@ -39,12 +52,13 @@ export function makeZip(entries: ZipEntry[]): Blob {
   const used = new Set<string>();
   for (const e of entries) {
     // Names stay unique and plain (no folders).
-    let name = e.name.replace(/[\\/]/g, '_') || 'file';
-    for (let k = 2; used.has(name); k++) name = e.name.replace(/(\.[^.]*)?$/, `-${k}$1`);
+    const base = e.name.replace(/[\\/]/g, '_') || 'file';
+    let name = base;
+    for (let k = 2; used.has(name); k++) name = base.replace(/(\.[^.]*)?$/, `-${k}$1`);
     used.add(name);
     const nameBytes = enc.encode(name);
-    const crc = crc32(e.data);
-    const size = e.data.length;
+    const crc = await crcOf(e.data);
+    const size = e.data instanceof Uint8Array ? e.data.length : e.data.size;
     if (offset + 30 + nameBytes.length + size > MAX_ZIP_BYTES) throw new RangeError('archive too large');
     const local = new Uint8Array(30 + nameBytes.length);
     const lv = new DataView(local.buffer);

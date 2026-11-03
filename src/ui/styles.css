@@ -1381,3 +1381,186 @@ input.masked {
     display: none;
   }
 }
+
+/* ---------- Protection level (under the picker) ---------- */
+
+.protect {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.protect-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.protect-icon {
+  display: grid;
+  color: var(--brand);
+}
+
+.protect-title {
+  flex: 1;
+  margin: 0;
+  font-weight: 800;
+}
+
+.protect-summary p {
+  margin: 6px 0 0;
+  font-size: 0.86rem;
+}
+
+.protect-level {
+  color: var(--text);
+}
+
+.protect-level strong {
+  color: var(--brand);
+}
+
+.protect-on {
+  color: var(--muted);
+}
+
+/* ---------- Settings sheet ---------- */
+
+.settings-sheet {
+  width: min(640px, 100%);
+  max-width: 100%;
+  max-height: 88vh;
+  margin: auto auto 0;
+  padding: 0 0 max(16px, env(safe-area-inset-bottom));
+  overflow: auto;
+  border: 0;
+  border-radius: 24px 24px 0 0;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  overscroll-behavior: contain;
+}
+
+.settings-sheet[open] {
+  animation: sheet-up 0.32s var(--ease) both;
+}
+
+.settings-sheet::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.sheet-head h2 {
+  font-size: 1.1rem;
+}
+
+.settings-sheet .options {
+  padding: 4px 18px 8px;
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.preset {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 10px 10px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+
+.preset input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.preset-name {
+  font-weight: 800;
+}
+
+.preset-text {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.preset:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.preset:has(input:focus-visible) {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Card details ---------- */
+
+.more-row:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  animation: rise 0.25s var(--ease) both;
+}
+
+.btn.open {
+  background: var(--brand-soft);
+}
+
+.findings-details > summary {
+  min-height: 40px;
+  padding: 4px 0;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.findings-details[open] > summary {
+  margin-bottom: 4px;
+}
+
+@keyframes sheet-up {
+  from {
+    opacity: 0.6;
+    transform: translateY(40px);
+  }
+}
+
+@media (min-width: 700px) {
+  .settings-sheet {
+    margin: auto;
+    border-radius: 24px;
+  }
+}

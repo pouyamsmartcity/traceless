@@ -22,6 +22,9 @@ export function append(el: Node, ...children: Child[]): void {
   }
 }
 
+/** Closers of the full-screen views that are open (editor, passphrase sheets), so "wipe" can close them all. */
+export const openViews = new Set<() => void>();
+
 export function clear(el: Element): void {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
