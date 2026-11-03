@@ -1,6 +1,6 @@
-# Pakkon for programs and AI agents
+# Traceless for programs and AI agents
 
-Pakkon is also a command-line tool and an MCP server, so scripts and AI agents (Claude, Cursor, VS Code, Codex
+Traceless is also a command-line tool and an MCP server, so scripts and AI agents (Claude, Cursor, VS Code, Codex
 and other MCP clients) can use it on files of your computer. Like the app, it runs **only on your computer**: it
 never opens a network connection, and it never changes or deletes your originals.
 
@@ -20,27 +20,27 @@ never opens a network connection, and it never changes or deletes your originals
 Requires Node.js 20 or newer.
 
 ```bash
-git clone <this repository> pakkon && cd pakkon
+git clone <this repository> traceless && cd traceless
 ```
 
 ```bash
 npm ci && npm run build:cli
 ```
 
-This makes one file, `dist-cli/pakkon.mjs`, with no other runtime dependencies. You can copy it anywhere.
+This makes one file, `dist-cli/traceless.mjs`, with no other runtime dependencies. You can copy it anywhere.
 
 ## Command line
 
 ```bash
-node dist-cli/pakkon.mjs inspect photo.jpg
+node dist-cli/traceless.mjs inspect photo.jpg
 ```
 
 ```bash
-node dist-cli/pakkon.mjs clean photo.jpg --cover 120,80,60,70,ellipse --cover 400,500,140,40 -o safe.jpg
+node dist-cli/traceless.mjs clean photo.jpg --cover 120,80,60,70,ellipse --cover 400,500,140,40 -o safe.jpg
 ```
 
 ```bash
-node dist-cli/pakkon.mjs check safe.jpg
+node dist-cli/traceless.mjs check safe.jpg
 ```
 
 - `inspect <file> [--json]`: what the file reveals.
@@ -55,35 +55,35 @@ applied), `x,y` is the top-left corner. Covers are solid: nothing under them can
 ## MCP server (for AI agents)
 
 The server speaks the [Model Context Protocol](https://modelcontextprotocol.io) (version 2025-06-18) over stdio.
-Replace `/path/to/pakkon` with where you cloned the repository.
+Replace `/path/to/traceless` with where you cloned the repository.
 
 **Claude Code** (in this repository it is already set up in `.mcp.json`; elsewhere):
 
 ```bash
-claude mcp add pakkon -- node /path/to/pakkon/dist-cli/pakkon.mjs mcp
+claude mcp add traceless -- node /path/to/traceless/dist-cli/traceless.mjs mcp
 ```
 
 **Claude Desktop** (`claude_desktop_config.json`), **Cursor** (`.cursor/mcp.json`) and most other clients:
 
 ```json
-{ "mcpServers": { "pakkon": { "command": "node", "args": ["/path/to/pakkon/dist-cli/pakkon.mjs", "mcp"] } } }
+{ "mcpServers": { "traceless": { "command": "node", "args": ["/path/to/traceless/dist-cli/traceless.mjs", "mcp"] } } }
 ```
 
 **VS Code** (`.vscode/mcp.json`):
 
 ```json
-{ "servers": { "pakkon": { "type": "stdio", "command": "node", "args": ["/path/to/pakkon/dist-cli/pakkon.mjs", "mcp"] } } }
+{ "servers": { "traceless": { "type": "stdio", "command": "node", "args": ["/path/to/traceless/dist-cli/traceless.mjs", "mcp"] } } }
 ```
 
 **OpenAI Codex CLI** (`~/.codex/config.toml`):
 
 ```toml
-[mcp_servers.pakkon]
+[mcp_servers.traceless]
 command = "node"
-args = ["/path/to/pakkon/dist-cli/pakkon.mjs", "mcp"]
+args = ["/path/to/traceless/dist-cli/traceless.mjs", "mcp"]
 ```
 
-ChatGPT's connectors need a server on the internet. Pakkon deliberately has none: your files would have to leave
+ChatGPT's connectors need a server on the internet. Traceless deliberately has none: your files would have to leave
 your computer.
 
 ### Tools
@@ -122,10 +122,10 @@ plate or sign it sees, then `check_file` on the result. The server tells agents 
 `motionPhoto`, `trailingData`, `extraImages`, `colorProfile`, `textChunks`, `extraTracks`, `otherMetadata`.
 Severity is `high`, `medium` or `low`.
 
-`clean` (and `clean_file`): `{ "output": "…/pakkon-x1y2z3.jpg", "kind": "image", "removed": [leaks…], "notes": ["…"] }`.
+`clean` (and `clean_file`): `{ "output": "…/traceless-x1y2z3.jpg", "kind": "image", "removed": [leaks…], "notes": ["…"] }`.
 
 `check` (and `check_file`): `{ "kind": "video", "clean": false, "problems": ["…"], "leaks": [leaks…] }`. The check is
-strict: it also reports structures Pakkon does not write (for example other programs' handler names), so a file
+strict: it also reports structures Traceless does not write (for example other programs' handler names), so a file
 made by another tool can fail it even when it hides nothing important. Read `problems` to decide.
 
 ## As a library

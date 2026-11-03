@@ -82,7 +82,7 @@ export function askPassphrase(t: Strings, mode: 'seal' | 'open'): Promise<string
 
 function randomSealName(): string {
   const a = crypto.getRandomValues(new Uint8Array(6));
-  return `sealed-${Array.from(a, (b) => (b % 36).toString(36)).join('')}.pakkon`;
+  return `sealed-${Array.from(a, (b) => (b % 36).toString(36)).join('')}.traceless`;
 }
 
 /** Seals the original file. Returns the sealed file to save, or null when cancelled. */
@@ -95,7 +95,7 @@ export async function sealOriginal(file: File, t: Strings): Promise<{ file: File
 }
 
 export async function looksSealed(file: File): Promise<boolean> {
-  if (/\.pakkon$/i.test(file.name)) return true;
+  if (/\.(traceless|pakkon)$/i.test(file.name)) return true;
   return isSealed(new Uint8Array(await file.slice(0, 16).arrayBuffer()));
 }
 

@@ -2,7 +2,7 @@
 """Generate the public suite of "leaky" test files in test/fixtures/leaky.
 
 Every file carries fake but realistic identifying data (location, device, owner, time, hidden extra images).
-The tests prove that Pakkon finds these leaks and that the cleaned output no longer contains them.
+The tests prove that Traceless finds these leaks and that the cleaned output no longer contains them.
 
 Requirements (only for regenerating; the generated files are committed):
   - Python 3 with Pillow

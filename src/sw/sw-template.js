@@ -1,8 +1,10 @@
-/* Pakkon service worker: keeps the whole app on the device so it works without internet,
+/* Traceless service worker: keeps the whole app on the device so it works without internet,
  * and receives files from the system share sheet. It never sends anything anywhere. */
 const VERSION = '__VERSION__';
 const PRECACHE = __FILES__;
-const CACHE = `pakkon-${VERSION}`;
+const CACHE = `traceless-${VERSION}`;
+/** The language pages in their own folders ("fa/", "tr/"); every other address shows the main page. */
+const PAGES = __PAGES__;
 
 /** Stores every app file. Files that did not change since the last version are copied from the old
  * cache instead of downloaded again (helps on slow or expensive connections). Files are stored one by one,
@@ -25,7 +27,7 @@ async function download(url) {
 
 async function precache() {
   const cache = await caches.open(CACHE);
-  const old = (await caches.keys()).filter((k) => k.startsWith('pakkon-') && k !== CACHE && k !== 'pakkon-shared');
+  const old = (await caches.keys()).filter((k) => k.startsWith('traceless-') && k !== CACHE && k !== 'traceless-shared');
   const queue = [...PRECACHE];
   async function next() {
     for (let url; (url = queue.shift()) !== undefined; ) {
@@ -52,8 +54,8 @@ self.addEventListener('activate', (event) => {
       // Older versions are removed, except the one just before this: a tab still open on it keeps finding the
       // parts it loads later (video, voice notes, ZIP), until it is reloaded. Cache names come back oldest first.
       .then((keys) => {
-        const ours = keys.filter((k) => k.startsWith('pakkon-') && k !== CACHE);
-        const keep = ours.filter((k) => k !== 'pakkon-shared').slice(-1);
+        const ours = keys.filter((k) => k.startsWith('traceless-') && k !== CACHE);
+        const keep = ours.filter((k) => k !== 'traceless-shared').slice(-1);
         return Promise.all(ours.filter((k) => !keep.includes(k)).map((k) => caches.delete(k)));
       })
       .then(() => self.clients.claim()),
@@ -94,10 +96,22 @@ function isolated(response) {
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
   headers.set('Cross-Origin-Resource-Policy', 'same-origin');
-  // No other site may show Pakkon inside a frame (a page cannot say this about itself in a meta tag).
+  // No other site may show Traceless inside a frame (a page cannot say this about itself in a meta tag).
   headers.set('Content-Security-Policy', "frame-ancestors 'none'");
   headers.set('X-Frame-Options', 'DENY');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+/** The address inside the app ("", "fa/", "tr/"...), or undefined for an address outside it. */
+function appPath(url) {
+  const scope = new URL(self.registration.scope).pathname;
+  return url.pathname.startsWith(scope) ? url.pathname.slice(scope.length) : undefined;
+}
+
+/** The stored page for a visit: the language page for its folder, the main page for everything else. */
+function pageFor(url) {
+  const path = appPath(url)?.replace(/index\.html$/, '');
+  return path && PAGES.includes(path) ? `./${path}index.html` : './index.html';
 }
 
 self.addEventListener('fetch', (event) => {
@@ -110,7 +124,13 @@ self.addEventListener('fetch', (event) => {
   }
   if (request.method !== 'GET') return;
   if (request.mode === 'navigate') {
-    event.respondWith(caches.match('./index.html', { cacheName: CACHE, ignoreSearch: true, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));
+    // "…/fa" without the slash: the page's own links are relative to its folder, so go to "…/fa/" first.
+    const path = appPath(url);
+    if (path && PAGES.includes(`${path}/`)) {
+      event.respondWith(Response.redirect(`${url.origin}${url.pathname}/${url.search}`, 301));
+      return;
+    }
+    event.respondWith(caches.match(pageFor(url), { cacheName: CACHE, ignoreSearch: true, ignoreVary: true }).then((r) => r || fetch(request)).then(isolated));
     return;
   }
   event.respondWith(stored(request).then((r) => r || fetch(request)).then(isolated));

@@ -1,12 +1,17 @@
-# Pakkon · پاک‌کن
+# Traceless: remove photo and video metadata, cover faces, offline
 
-Make a photo or video safe to share, in one step, fully offline. Pakkon removes what can reveal where, when and with
-which device a picture was taken, and covers faces and licence plates with solid colour.
+**English** · [فارسی](README.fa.md) · [Türkçe](README.tr.md)
 
-*Pakkon* (پاک‌کن) is Persian for "eraser".
+Make a photo, video or voice note safe to share, in one step, fully offline. Traceless removes the hidden data
+(EXIF metadata, GPS location, phone model and serial number, dates) that can reveal where, when and with which device
+a file was made, and covers faces, licence plates and text with solid colour. Free and open source. Nothing is
+uploaded.
 
-**Use it:** https://pouyamsmartcity.github.io/pakkon/ (open it once with internet; after that it works offline, and
-it can be installed on the phone's home screen).
+In Persian it is called «بی‌ردپا», in Turkish "İzsiz": both mean the same, "without a trace".
+
+**Use it:** https://pouyamsmartcity.github.io/traceless/ (also in [Persian](https://pouyamsmartcity.github.io/traceless/fa/)
+and [Turkish](https://pouyamsmartcity.github.io/traceless/tr/)). Open it once with internet; after that it works
+offline, and it can be installed on the phone's home screen.
 
 - **Offline.** Everything runs on your phone or computer. The page is not allowed to contact any server (strict
   Content Security Policy), there are no accounts and no analytics. After the first visit it works without internet.
@@ -17,7 +22,7 @@ it can be installed on the phone's home screen).
   and licence plates, including Iranian plates. Covers are solid fills, because blur and pixelation can sometimes be
   reversed, drawn in clean shapes: ovals for faces, rounded shapes for plates and text, and each person's own
   silhouette (found by a segmentation network) when whole people are covered. Four looks: "smart" (a colour taken
-  from around the cover, so it sits naturally in the picture), black, Pakkon's green with its eraser mark, and a
+  from around the cover, so it sits naturally in the picture), black, Traceless's green with its eraser mark, and a
   friendly "sticker" (faces become a solid yellow smiley). You can add or remove covers by hand, and drag across a
   picture to compare it with the original. In videos, every face is tracked and covered on every frame; a filmstrip
   of the safe video lets you check the covers quickly.
@@ -30,7 +35,7 @@ it can be installed on the phone's home screen).
 - **Change voices or remove the sound** in videos on request (voices and background sounds can identify people
   and places). Voices are made deeper by a random, slowly drifting factor: this stops casual listeners, not someone who works to undo it; words and accents stay. Removing the sound is the safe choice.
 - **Voice notes and recordings.** Voice memos and messenger voice notes (M4A, MP3, OGG/Opus, WAV and more) can carry
-  a place-named title, the speaker's name, the date, the recording app, a location and a cover picture. Pakkon
+  a place-named title, the speaker's name, the date, the recording app, a location and a cover picture. Traceless
   re-encodes the sound into a fresh M4A that holds nothing else, and can change the voice too.
 - **Smaller files on request** for slow or expensive connections: photos at most 1600 pixels, videos at most 1280
   pixels at a lower bitrate, voice notes at 32 kbit/s. Every card shows the size before and after.
@@ -40,28 +45,29 @@ it can be installed on the phone's home screen).
   it by itself five minutes after the app goes to the background.
 - **Save all as one ZIP** (files stored as they are, with no real dates inside), or share them all at once.
 - **Seal the original** (optional): lock the untouched original with a passphrase and record its fingerprint, to
-  prove one day that a shared photo is real, without ever sharing the original. Open a `.pakkon` file in Pakkon to
+  prove one day that a shared photo is real, without ever sharing the original. Open a `.traceless` file in Traceless to
   check it.
-- **Take photos inside Pakkon** on phones, so the original never lands in the gallery.
+- **Take photos inside Traceless** on phones, so the original never lands in the gallery.
 - **Warnings and hints:** "this photo may show where it was taken" when signs, writing or plates stay uncovered;
   "at least N people are visible" for crowds; and for photos you receive, signs of editing (editor name, changed
   dates, a hidden thumbnail that shows a different or uncropped picture), as hints, never proof.
 - **Fails safe.** If finding faces or covering a video fails, no copy is offered until you cover things by hand or
   explicitly continue without covering. Every output is checked again before you get it.
 - **A checklist before sending** for what software cannot judge: reflections, signs, tattoos, shadows, voices.
-- **"What did this file reveal?"** Before cleaning, Pakkon lists in plain words what the file was giving away, and
+- **"What did this file reveal?"** Before cleaning, Traceless lists in plain words what the file was giving away, and
   shows the nearest town for a GPS location (from an offline list).
 - **Videos.** Rebuilt into a fresh MP4 with only picture and sound; location, device tags, dates, track names, extra
   data tracks (such as GPS tracks) and metadata inside the video stream itself (camcorders store time, model and GPS
   there) are dropped. With covering on, the picture is re-encoded with covers on every frame;
   with covering off, picture and sound are copied without quality loss. Devices that cannot re-encode video still get
   the hidden data removed, with a clear warning that faces were not covered.
-- **Persian first**, English too. Random output file names. Installable on Android, iPhone and desktop; on Android
-  you can share photos straight into Pakkon from the gallery.
+- **English, Persian and Turkish**, chosen from the browser's language (or the page: `/fa/`, `/tr/`) and changeable
+  at any time. Random output file names. Installable on Android, iPhone and desktop; on Android
+  you can share photos straight into Traceless from the gallery.
 
-## What Pakkon cannot do
+## What Traceless cannot do
 
-Pakkon never claims a file is "100% safe". It does not hide:
+Traceless never claims a file is "100% safe". It does not hide:
 
 - what is visible in the picture: signs, landmarks, shadows, reflections, clothes, tattoos;
 - faces or plates the detector missed, so always look at the picture before sending. On 40 crowd photos from the
@@ -111,7 +117,7 @@ file ──► inspect (what does it reveal?) ──► decode pixels ──► 
 
 ## For programs and AI agents
 
-Pakkon is also a command-line tool and an [MCP](https://modelcontextprotocol.io) server, so scripts and AI agents
+Traceless is also a command-line tool and an [MCP](https://modelcontextprotocol.io) server, so scripts and AI agents
 (Claude, Cursor, VS Code, Codex and other MCP clients) can inspect, clean and check files on your computer, still
 fully offline. See [`docs/API.md`](docs/API.md). Developers and coding agents: start with [`AGENTS.md`](AGENTS.md).
 
@@ -153,7 +159,13 @@ host works, also under a sub-path. Recommended host settings:
 - Send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` so the first visit
   can already use several processor cores (the offline copy adds them by itself afterwards).
 - Send `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` (the offline copy adds them by
-  itself) so no other site can show Pakkon inside a frame.
+  itself) so no other site can show Traceless inside a frame.
+
+The build also writes one page per language (`/`, `/fa/`, `/tr/`) with its own title, description, links between
+the languages (hreflang), sharing previews and structured data, plus `sitemap.xml`. Set `SITE_URL` to the public
+address when building for another host (the Pages workflow does this). Search engines: submit
+`<site>/sitemap.xml` in Google Search Console and Bing Webmaster Tools (a project site cannot have its own
+`robots.txt`).
 
 Updates: a new version is downloaded in the background, file by file (unchanged files are reused, every file is
 checked against its fingerprint). Tabs that are open keep working on the version they started with; they show a

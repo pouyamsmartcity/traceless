@@ -8,7 +8,7 @@ a stale embedded thumbnail, XMP edit history, IPTC city, a Content Credentials (
 Photo style video after the end of the JPEG, PNG text chunks and leftover bytes after the PNG end ("aCropalypse"),
 and videos with location, device tags and an extra subtitle track holding GPS text.
 
-The tests check that Pakkon reports these leaks and that the cleaned files contain none of them.
+The tests check that Traceless reports these leaks and that the cleaned files contain none of them.
 
 `photo-edited.jpg` carries typical signs of editing (an editor's name, a later modify date, a thumbnail of a
 different shape) and `photo-honest.jpg` is an unedited photo whose thumbnail matches; they test the edit hints and

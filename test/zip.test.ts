@@ -21,7 +21,7 @@ describe('zip', () => {
       { name: '', data: new Uint8Array([6]) },
       { name: '', data: new Uint8Array([7]) },
     ]);
-    const dir = mkdtempSync(join(tmpdir(), 'pakkon-zip-'));
+    const dir = mkdtempSync(join(tmpdir(), 'traceless-zip-'));
     const path = join(dir, 'x.zip');
     writeFileSync(path, new Uint8Array(await blob.arrayBuffer()));
     const out = execFileSync('python3', [

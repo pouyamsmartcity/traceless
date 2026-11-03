@@ -109,12 +109,12 @@ async function videoRegion(page: Page, t: number, rect: { x: number; y: number; 
   );
 }
 
-test.describe('Pakkon', () => {
+test.describe('Traceless', () => {
   test('loads in Persian with a strict content security policy', async ({ page }) => {
     const foreign = watchNetwork(page);
     await page.goto('/');
     await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('پاک‌کن');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Traceless');
     const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toContain("default-src 'self'");
@@ -245,7 +245,7 @@ test.describe('Pakkon', () => {
     const { name } = await outputBytes(page);
     expect(name).not.toContain('IMG_2026');
     // The shared file is never written to storage, and the address bar is cleaned.
-    expect(await page.evaluate(async () => (await caches.keys()).filter((k) => !/^pakkon-[0-9a-f]{12}$/.test(k)))).toEqual([]);
+    expect(await page.evaluate(async () => (await caches.keys()).filter((k) => !/^traceless-[0-9a-f]{12}$/.test(k)))).toEqual([]);
     expect(page.url()).not.toContain('shared');
   });
 
@@ -397,7 +397,7 @@ test.describe('Pakkon', () => {
     const download = page.waitForEvent('download');
     await page.getByTestId('passphrase-ok').click();
     const file = await download;
-    expect(file.suggestedFilename()).toMatch(/^sealed-[a-z0-9]{6}\.pakkon$/);
+    expect(file.suggestedFilename()).toMatch(/^sealed-[a-z0-9]{6}\.traceless$/);
     const sealedPath = await file.path();
     const sha = createHash('sha256').update(readFileSync(fixture('leaky/photo-everything.jpg'))).digest('hex');
     // A seal code is shown (safe to note down), never the plain fingerprint of the original.
@@ -410,11 +410,11 @@ test.describe('Pakkon', () => {
     expect(sealedBytes.toString('latin1')).not.toContain('FakePhone');
 
     // Open it with a wrong passphrase, then the right one.
-    await page.getByTestId('file-input').setInputFiles({ name: 'evidence.pakkon', mimeType: 'application/octet-stream', buffer: sealedBytes });
+    await page.getByTestId('file-input').setInputFiles({ name: 'evidence.traceless', mimeType: 'application/octet-stream', buffer: sealedBytes });
     await page.getByTestId('passphrase').fill('not the passphrase');
     await page.getByTestId('passphrase-ok').click();
     await expect(page.getByTestId('sealed-card').first()).toContainText('رمز اشتباه');
-    await page.getByTestId('file-input').setInputFiles({ name: 'evidence.pakkon', mimeType: 'application/octet-stream', buffer: sealedBytes });
+    await page.getByTestId('file-input').setInputFiles({ name: 'evidence.traceless', mimeType: 'application/octet-stream', buffer: sealedBytes });
     await page.getByTestId('passphrase').fill('correct horse battery');
     await page.getByTestId('passphrase-ok').click();
     const card = page.getByTestId('sealed-card').first();
@@ -455,7 +455,7 @@ test.describe('Pakkon', () => {
     expect((await regionColor(page, { x: 22, y: 60, w: 30, h: 60 })).spread).toBeGreaterThan(20);
   });
 
-  test('cover looks: smart colour, black, and Pakkon green, all solid', async ({ page }) => {
+  test('cover looks: smart colour, black, and Traceless green, all solid', async ({ page }) => {
     await page.goto('/');
     await addFile(page, fixture('real/astronaut.png'));
     await readyItem(page);
@@ -473,7 +473,7 @@ test.describe('Pakkon', () => {
     await readyItem(page);
     await page.waitForTimeout(500);
     await readyItem(page);
-    // Away from the eraser mark in the middle, the cover is Pakkon green (#126354).
+    // Away from the eraser mark in the middle, the cover is Traceless green (#126354).
     c = await regionColor(page, { x: 200, y: 75, w: 50, h: 12 });
     expect(Math.abs(c.r - 0x12)).toBeLessThan(6);
     expect(Math.abs(c.g - 0x63)).toBeLessThan(6);
@@ -704,7 +704,7 @@ test.describe('Pakkon', () => {
             // The failed install leaves no worker behind (the browser drops the registration).
             const reg = await navigator.serviceWorker.getRegistration();
             if (reg?.installing || reg?.waiting || reg?.active) return -1;
-            const names = (await caches.keys()).filter((k) => k.startsWith('pakkon-'));
+            const names = (await caches.keys()).filter((k) => k.startsWith('traceless-'));
             let n = 0;
             for (const k of names) n += (await (await caches.open(k)).keys()).length;
             return n;
@@ -758,10 +758,92 @@ test.describe('Pakkon', () => {
     await expect(page.getByTestId('offline-badge')).not.toContainText('آمادهٔ کار بدون اینترنت');
   });
 
-  test('switches to English', async ({ page }) => {
+  test('switches between English, Persian and Turkish, and remembers the choice', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'English' }).click();
+    const picker = page.getByTestId('lang');
+    await expect(picker).toHaveValue('fa');
+    // Each language is listed in its own name.
+    await expect(picker.locator('option')).toHaveText(['English', 'فارسی', 'Türkçe']);
+    await picker.selectOption('en');
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Pakkon');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.getByRole('heading', { level: 2, name: 'Clean it before you send it' })).toBeVisible();
+    await picker.selectOption('tr');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'tr');
+    await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+    await expect(page.getByRole('heading', { level: 2, name: 'Göndermeden önce temizleyin' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId('lang')).toHaveValue('tr');
+    await page.getByTestId('lang').selectOption('fa');
+    await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+    await expect(page.getByRole('heading', { level: 2, name: 'قبل از فرستادن، پاکش کن' })).toBeVisible();
   });
 });
+
+test.describe('language pages', () => {
+  test('the Persian page starts in Persian, covers faces and works offline in its own folder', async ({ page, context }) => {
+    test.skip(test.info().project.name !== 'phone', 'one size is enough');
+    await page.goto('/fa/');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fa');
+    await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+    await expect(page).toHaveTitle(/بی‌ردپا/);
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', /\/fa\/$/);
+    await expect(page.getByTestId('offline-badge')).toContainText('آمادهٔ کار بدون اینترنت', { timeout: 90_000 });
+    // The app's files (models included) come from the main folder, not from /fa/.
+    await addFile(page, fixture('real/astronaut.png'));
+    const item = await readyItem(page);
+    await expect(item.getByTestId('mask-summary')).toContainText('۱ صورت');
+    await context.setOffline(true);
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fa');
+    expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
+    await addFile(page, fixture('real/astronaut.png'));
+    await expect((await readyItem(page)).getByTestId('mask-summary')).toContainText('۱ صورت');
+    // The Turkish page is stored too, and so is the main page.
+    await page.goto('/tr/');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fa'); // the saved choice from /fa/ wins
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', /\/tr\/$/);
+    await page.goto('/');
+    await expect(page.getByTestId('lang')).toHaveValue('fa');
+    await context.setOffline(false);
+  });
+
+  test('the Turkish page starts in Turkish even in a Persian browser, and keeps it for the installed app', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'one size is enough');
+    await page.goto('/tr/');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'tr');
+    await expect(page.getByRole('heading', { level: 2, name: 'Göndermeden önce temizleyin' })).toBeVisible();
+    await expect(page).toHaveTitle(/fotoğraftan meta veri/i);
+    // The installed app opens the main page: it stays in Turkish.
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'tr');
+  });
+
+  test('without JavaScript each page still explains itself in its language', async ({ browser }) => {
+    test.skip(test.info().project.name !== 'desktop', 'one size is enough');
+    const context = await browser.newContext({ javaScriptEnabled: false });
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 2 }).first()).toContainText('Remove hidden data');
+    await page.goto('/fa/');
+    await expect(page.getByRole('heading', { level: 2 }).first()).toContainText('اطلاعات پنهان');
+    await expect(page.getByRole('link', { name: 'Türkçe' })).toHaveAttribute('href', '../tr/');
+    await context.close();
+  });
+});
+
+for (const [locale, lang, heading] of [
+  ['tr-TR', 'tr', 'Göndermeden önce temizleyin'],
+  ['de-DE', 'en', 'Clean it before you send it'],
+  ['en-US', 'en', 'Clean it before you send it'],
+] as const) {
+  test.describe(`browser language ${locale}`, () => {
+    test.use({ locale });
+    test(`starts in ${lang}`, async ({ page }) => {
+      test.skip(test.info().project.name !== 'desktop', 'one size is enough');
+      await page.goto('/');
+      await expect(page.locator('html')).toHaveAttribute('lang', lang);
+      await expect(page.getByRole('heading', { level: 2, name: heading })).toBeVisible();
+    });
+  });
+}

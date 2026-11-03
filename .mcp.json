@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "pakkon": {
+    "traceless": {
       "command": "node",
-      "args": ["dist-cli/pakkon.mjs", "mcp"]
+      "args": ["dist-cli/traceless.mjs", "mcp"]
     }
   }
 }

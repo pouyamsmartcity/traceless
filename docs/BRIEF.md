@@ -1,12 +1,14 @@
 # Brief
 
-Name: **Pakkon** (پاک‌کن, "eraser"). Chosen because every Persian speaker knows the word, it says what the tool
-does, it is short in both languages, and an app called "eraser" looks harmless on a phone at a checkpoint.
+Name: **Traceless** (Persian «بی‌ردپا», Turkish "İzsiz"; all three mean "without a trace"). An English name that
+says what the tool does and that people find when they search; each language page carries the local name and the
+words people search for in that language. (The first working name was Pakkon, "eraser"; sealed files from then still
+open.)
 
 ## Goal
 A free, open-source tool that makes photos and videos safe to share. It runs fully offline (nothing is uploaded),
-works on phones first (installable web app) and on desktops, and is Persian-first with other languages of Iran and
-English. Target users: journalists, activists and ordinary people who share images of events.
+works on phones first (installable web app) and on desktops. English is the main language; Persian and Turkish are
+full translations, each with its own page for search engines. Target users: journalists, activists and ordinary people who share images of events.
 
 ## Product rules
 - Offline by default. No network requests, no analytics, no accounts. Make this verifiable (visible "nothing left

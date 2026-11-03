@@ -18,6 +18,18 @@ describe('sealed originals', () => {
     expect(opened.header.sealedAt).toBe('2026-11-02T10:00:00.000Z');
   }, 30_000);
 
+  it('writes the new name in the header and still opens files sealed under the earlier name', async () => {
+    const { sealed } = await seal(original, { name: 'a.jpg', type: 'image/jpeg' }, 'correct horse battery');
+    expect(new TextDecoder().decode(sealed.subarray(0, 12))).toBe('TRACELESS01\n');
+    const old = new Uint8Array(sealed);
+    old.set(new TextEncoder().encode('PAKKONSEAL1\n'), 0);
+    expect(isSealed(old)).toBe(true);
+    expect(Array.from((await unseal(old, 'correct horse battery')).original)).toEqual(Array.from(original));
+    const other = new Uint8Array(sealed);
+    other[0] = 0x58;
+    expect(isSealed(other)).toBe(false);
+  }, 30_000);
+
   it('refuses a wrong passphrase and a changed file', async () => {
     const { sealed } = await seal(original, { name: 'a.jpg', type: 'image/jpeg' }, 'correct horse battery');
     await expect(unseal(sealed, 'wrong passphrase!!')).rejects.toBeInstanceOf(SealError);

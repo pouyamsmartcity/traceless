@@ -4,7 +4,7 @@ import { mkdtempSync, copyFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const bin = new URL('../dist-cli/pakkon.mjs', import.meta.url).pathname;
+const bin = new URL('../dist-cli/traceless.mjs', import.meta.url).pathname;
 const fixture = (p) => new URL(`../test/fixtures/${p}`, import.meta.url).pathname;
 const fail = (msg) => {
   console.error(`smoke test failed: ${msg}`);
@@ -12,7 +12,7 @@ const fail = (msg) => {
 };
 
 // 1. Command line: inspect, clean, check.
-const dir = mkdtempSync(join(tmpdir(), 'pakkon-smoke-'));
+const dir = mkdtempSync(join(tmpdir(), 'traceless-smoke-'));
 copyFileSync(fixture('leaky/photo-everything.jpg'), join(dir, 'photo.jpg'));
 const run = (...args) => spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8' });
 const inspected = JSON.parse(run('inspect', join(dir, 'photo.jpg'), '--json').stdout);
@@ -45,7 +45,7 @@ const deadline = Date.now() + 30000;
 while (replies.length < 6 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
 server.kill();
 const byId = Object.fromEntries(replies.map((r) => [r.id, r]));
-if (byId[1]?.result?.serverInfo?.name !== 'pakkon') fail('initialize');
+if (byId[1]?.result?.serverInfo?.name !== 'traceless') fail('initialize');
 if (byId[2]?.result?.tools?.length !== 3) fail('tools/list');
 if (!byId[3]?.result?.content?.[0]?.text?.includes('Enghelab')) fail('tools/call inspect_file');
 const order = replies.map((r) => r.id);

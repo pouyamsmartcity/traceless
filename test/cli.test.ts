@@ -83,11 +83,11 @@ describe('command-line and agent tools (no browser)', () => {
 });
 
 describe('MCP server', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'pakkon-mcp-'));
+  const dir = mkdtempSync(join(tmpdir(), 'traceless-mcp-'));
 
   it('introduces itself and lists its tools', async () => {
     const init = await handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } } });
-    expect((init!.result as { serverInfo: { name: string } }).serverInfo.name).toBe('pakkon');
+    expect((init!.result as { serverInfo: { name: string } }).serverInfo.name).toBe('traceless');
     expect(await handle({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeUndefined();
     const list = await handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     expect((list!.result as { tools: { name: string }[] }).tools.map((t) => t.name)).toEqual(['inspect_file', 'clean_file', 'check_file']);

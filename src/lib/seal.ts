@@ -3,8 +3,8 @@
  * A journalist can keep it (or give it to a lawyer) and later prove that a shared safe copy came from a real,
  * unedited original, without ever sharing the original itself.
  *
- * Format (all in one file, ".pakkon"):
- *   "PAKKONSEAL1\n" (12 bytes) | salt (16) | iv (12) | AES-256-GCM ciphertext of:
+ * Format (all in one file, ".traceless"):
+ *   "TRACELESS01\n" (12 bytes; files from before the rename start with "PAKKONSEAL1\n" and open the same way) | salt (16) | iv (12) | AES-256-GCM ciphertext of:
  *       header length (4, big-endian) | JSON header | original bytes
  * The header holds the name, type, size, SHA-256 and seal time, a random secret, and a "seal code":
  * HMAC-SHA-256(secret, original). The seal code can be noted down or even published: without the sealed file
@@ -15,7 +15,9 @@
  * and Node. Nothing is stored by the app; the user saves the file.
  */
 
-const MAGIC = new TextEncoder().encode('PAKKONSEAL1\n');
+const MAGIC = new TextEncoder().encode('TRACELESS01\n');
+/** The same format under the app's earlier name; still opened. */
+const OLD_MAGIC = new TextEncoder().encode('PAKKONSEAL1\n');
 const ITERATIONS = 600_000;
 
 export interface SealHeader {
@@ -120,8 +122,7 @@ export async function seal(original: Uint8Array, meta: { name: string; type: str
 
 export function isSealed(b: Uint8Array): boolean {
   if (b.length < MAGIC.length) return false;
-  for (let i = 0; i < MAGIC.length; i++) if (b[i] !== MAGIC[i]) return false;
-  return true;
+  return [MAGIC, OLD_MAGIC].some((m) => m.every((x, i) => b[i] === x));
 }
 
 function validHeader(x: unknown): SealHeader {

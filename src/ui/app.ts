@@ -6,8 +6,9 @@ import type { Finding, FindingId } from '../lib/findings';
 import { loadPlaces, nearest, type Place } from '../lib/places';
 import { ICONS, append, clear, h, icon, openViews } from './dom';
 import { openEditor } from './editor';
+import { REPO_URL } from '../site';
 import { MAX_SEAL_BYTES, looksSealed, openSealed, sealOriginal, type OpenResult } from './seal-ui';
-import { STRINGS, countryName, formatNumber, type Lang, type Strings } from './i18n';
+import { LANGS, LANG_NAMES, STRINGS, countryName, detectLang, formatNumber, isLang, isRtl, numberFormat, percent, type Lang, type Strings } from './i18n';
 import { ensurePeople, ensureText, locationRisks, lookForText, newItem, processItem, randomName, renderImage, sameOptions, upToDate, type Item, type Options } from './pipeline';
 
 type Theme = 'system' | 'light' | 'dark';
@@ -41,14 +42,27 @@ const SUMMARY_KEYS = ['faces', 'plates', 'text', 'people', 'voice', 'mute', 'ext
 /** How long the app may stay in the background before "auto-forget" wipes it. */
 const AUTO_WIPE_MS = 5 * 60 * 1000;
 
+/**
+ * The language to start in when the user has not chosen one: the page's own language on the Persian and Turkish
+ * pages (/fa/, /tr/), otherwise the browser's preferred languages, otherwise English.
+ */
+function startLang(): Lang {
+  const page = document.documentElement.dataset.pageLang;
+  if (isLang(page)) return page;
+  return detectLang(navigator.languages?.length ? navigator.languages : [navigator.language]);
+}
+
 function loadSettings(): Settings {
-  const defaults: Settings = { lang: 'fa', faces: true, plates: true, extra: false, text: false, mute: false, voice: false, people: false, maskStyle: 'smart', light: false, theme: 'system', autoWipe: false };
+  const defaults: Settings = { lang: startLang(), faces: true, plates: true, extra: false, text: false, mute: false, voice: false, people: false, maskStyle: 'smart', light: false, theme: 'system', autoWipe: false };
   try {
-    const raw = localStorage.getItem('pakkon-settings');
+    const raw = localStorage.getItem('traceless-settings');
+    // Opened through the Persian or Turkish page: keep that language, also when the installed app later opens the
+    // main page.
+    if (!raw && isLang(document.documentElement.dataset.pageLang)) saveSettings(defaults);
     if (raw) {
       const s = JSON.parse(raw) as Partial<Settings>;
       return {
-        lang: s.lang === 'en' ? 'en' : 'fa',
+        lang: isLang(s.lang) ? s.lang : defaults.lang,
         faces: s.faces !== false,
         plates: s.plates !== false,
         extra: s.extra === true,
@@ -70,7 +84,7 @@ function loadSettings(): Settings {
 
 function saveSettings(s: Settings): void {
   try {
-    localStorage.setItem('pakkon-settings', JSON.stringify(s));
+    localStorage.setItem('traceless-settings', JSON.stringify(s));
   } catch {
     // Not important if it cannot be saved.
   }
@@ -140,7 +154,7 @@ export class App {
     }
   }
 
-  /** A new version of Pakkon is ready: a bar with a reload button (the user chooses when). */
+  /** A new version of Traceless is ready: a bar with a reload button (the user chooses when). */
   showUpdateReady(): void {
     if (this.root.querySelector('[data-testid="update-bar"]')) return;
     const t = this.t;
@@ -163,8 +177,8 @@ export class App {
   /** Adds files from the picker, drag and drop, paste or the system share sheet. */
   addFiles(files: Iterable<File>): void {
     for (const file of files) {
-      // A sealed original (.pakkon) is opened, not cleaned.
-      if (/\.pakkon$/i.test(file.name)) {
+      // A sealed original (.traceless, or .pakkon from before the rename) is opened, not cleaned.
+      if (/\.(traceless|pakkon)$/i.test(file.name)) {
         void this.openSealedFile(file);
         continue;
       }
@@ -256,10 +270,12 @@ export class App {
     this.settingsEl?.close();
     const t = this.t;
     document.documentElement.lang = this.settings.lang;
-    document.documentElement.dir = this.settings.lang === 'fa' ? 'rtl' : 'ltr';
+    document.documentElement.dir = isRtl(this.settings.lang) ? 'rtl' : 'ltr';
     if (this.settings.theme === 'system') delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = this.settings.theme;
-    document.title = `${t.appName} · ${t.tagline}`;
+    // The same title as the language's own page (search engines read the title after the app has started).
+    document.title = t.pageTitle;
+    document.querySelector('meta[name="description"]')?.setAttribute('content', t.pageDescription);
     clear(this.root);
 
     const input = h('input', {
@@ -274,7 +290,7 @@ export class App {
       input.value = '';
     });
 
-    // Any file type: phones' photo pickers do not offer .pakkon files.
+    // Any file type: phones' photo pickers do not offer .traceless files.
     const sealedInput = h('input', { type: 'file', className: 'visually-hidden', 'data-testid': 'sealed-input' });
     sealedInput.addEventListener('change', () => {
       const f = sealedInput.files?.[0];
@@ -282,7 +298,7 @@ export class App {
       sealedInput.value = '';
     });
 
-    // On phones: take a photo or video inside Pakkon, so the original never lands in the gallery.
+    // On phones: take a photo or video inside Traceless, so the original never lands in the gallery.
     const camera = h('input', {
       type: 'file',
       accept: 'image/*,video/*',
@@ -310,9 +326,16 @@ export class App {
       return h('label', { className: 'chip' }, box, h('span', { className: 'chip-icon' }, icon(ic, 18)), h('span', { className: 'chip-label' }, label), h('span', { className: 'chip-check' }, icon(ICONS.check, 14)));
     };
 
-    const langBtn = h('button', { type: 'button', className: 'icon-btn text', lang: this.settings.lang === 'fa' ? 'en' : 'fa' }, t.langSwitch);
-    langBtn.addEventListener('click', () => {
-      this.settings.lang = this.settings.lang === 'fa' ? 'en' : 'fa';
+    // Each language is named in itself, so someone who cannot read the current one still finds theirs.
+    const langSelect = h(
+      'select',
+      { className: 'lang-select', 'aria-label': t.langSwitch === 'Language' ? t.langSwitch : `${t.langSwitch} · Language`, title: t.langSwitch, 'data-testid': 'lang' },
+      ...LANGS.map((l) => h('option', { value: l, lang: l, selected: l === this.settings.lang }, LANG_NAMES[l])),
+    );
+    const langBtn = h('label', { className: 'icon-btn lang-picker' }, icon(ICONS.globe, 20), h('span', { className: 'lang-code', 'aria-hidden': 'true' }, this.settings.lang.toUpperCase()), langSelect);
+    langSelect.addEventListener('change', () => {
+      if (!isLang(langSelect.value) || langSelect.value === this.settings.lang) return;
+      this.settings.lang = langSelect.value;
       saveSettings(this.settings);
       this.cards.clear();
       for (const p of this.previews.values()) p.release();
@@ -448,7 +471,7 @@ export class App {
       h(
         'footer',
         {},
-        h('p', {}, t.footer, ' · ', h('a', { href: 'https://www.pouyam.com', rel: 'noopener', target: '_blank' }, 'pouyam.com')),
+        h('p', {}, t.footer, ' · ', h('a', { href: 'https://www.pouyam.com', rel: 'noopener', target: '_blank' }, 'pouyam.com'), ' · ', h('a', { href: REPO_URL, rel: 'noopener', target: '_blank' }, t.sourceCode)),
         h('p', { className: 'small' }, t.dataCredit),
       ),
       this.toastEl,
@@ -488,7 +511,7 @@ export class App {
   private introCard(standalone: boolean): HTMLElement | null {
     let done = false;
     try {
-      done = localStorage.getItem('pakkon-intro') === 'done';
+      done = localStorage.getItem('traceless-intro') === 'done';
     } catch {
       // Storage blocked: show it (it can be closed for this visit).
     }
@@ -509,7 +532,7 @@ export class App {
     close.addEventListener('click', () => {
       this.introClosed = true;
       try {
-        localStorage.setItem('pakkon-intro', 'done');
+        localStorage.setItem('traceless-intro', 'done');
       } catch {
         // Not important.
       }
@@ -831,7 +854,7 @@ export class App {
       }
     } else {
       const n = item.progress !== undefined && item.status !== 'ready' ? Math.round(item.progress * 100) : undefined;
-      const pct = n === undefined ? '' : ` ${formatNumber(lang, n)}${lang === 'fa' ? '٪' : '%'}`;
+      const pct = n === undefined ? '' : ` ${percent(lang, n)}`;
       const left = item.progress !== undefined && item.status !== 'ready' ? secondsLeft(item.clock, item.progress, Date.now()) : undefined;
       body.appendChild(
         h('p', { className: `status ${item.status}`, 'data-testid': 'item-status' }, item.status === 'ready' ? icon(ICONS.check, 18) : null, this.statusText(item) + pct),
@@ -1316,7 +1339,7 @@ export class App {
         alert(this.t.errTooLarge);
         return;
       }
-      saveBlob(blob, randomName('zip').replace(/^img-/, 'pakkon-'));
+      saveBlob(blob, randomName('zip').replace(/^img-/, 'traceless-'));
     });
     this.bulkEl.appendChild(zip);
   }
@@ -1374,7 +1397,7 @@ function saveBlob(blob: Blob, name: string): void {
 function formatSize(lang: Lang, bytes: number, t: Strings): string {
   const mb = bytes >= 1024 * 1024;
   const v = mb ? bytes / (1024 * 1024) : Math.max(1, Math.round(bytes / 1024));
-  const num = new Intl.NumberFormat(lang === 'fa' ? 'fa-IR' : 'en-US', { maximumFractionDigits: mb ? 1 : 0 }).format(v);
+  const num = numberFormat(lang, { maximumFractionDigits: mb ? 1 : 0 }).format(v);
   return `${num} ${mb ? t.units.mb : t.units.kb}`;
 }
 
@@ -1395,7 +1418,7 @@ function progressRing(fraction: number, lang: Lang): SVGSVGElement {
   }
   const text = document.createElementNS(NS, 'text');
   for (const [k, v] of Object.entries({ x: '32', y: '37', 'text-anchor': 'middle', class: 'ring-text' })) text.setAttribute(k, v);
-  text.textContent = `${formatNumber(lang, Math.round(fraction * 100))}${lang === 'fa' ? '٪' : '%'}`;
+  text.textContent = percent(lang, Math.round(fraction * 100));
   svg.append(track, bar, text);
   return svg;
 }

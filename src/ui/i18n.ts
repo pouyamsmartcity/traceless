@@ -1,17 +1,47 @@
-import type { FindingId } from '../lib/findings';
-import type { HintId } from '../lib/inspect-image';
+import type { FindingId } from '../lib/findings.ts';
+import type { HintId } from '../lib/inspect-image.ts';
 
-export type Lang = 'fa' | 'en';
+/** English is the main language (and the fallback); Persian and Turkish are full translations. */
+export type Lang = 'en' | 'fa' | 'tr';
+
+export const LANGS: readonly Lang[] = ['en', 'fa', 'tr'];
+
+/** Each language's own name, shown in the language picker in that language. */
+export const LANG_NAMES: Record<Lang, string> = { en: 'English', fa: 'فارسی', tr: 'Türkçe' };
+
+export function isLang(x: unknown): x is Lang {
+  return typeof x === 'string' && (LANGS as readonly string[]).includes(x);
+}
+
+export function isRtl(lang: Lang): boolean {
+  return lang === 'fa';
+}
+
+/**
+ * The first of the browser's preferred languages that the app speaks ("fa-IR" → fa, "tr-TR" → tr), else English.
+ * Dari ("prs") and Tajik written in Persian script are close enough to read the Persian text.
+ */
+export function detectLang(preferred: readonly string[] | undefined): Lang {
+  for (const tag of preferred ?? []) {
+    const base = tag.toLowerCase().split(/[-_]/)[0];
+    if (base === 'fa' || base === 'prs' || base === 'per') return 'fa';
+    if (base === 'tr') return 'tr';
+    if (base === 'en') return 'en';
+  }
+  return 'en';
+}
 
 const fa = {
-  appName: 'پاک‌کن',
+  appName: 'Traceless',
   tagline: 'عکس، ویدیو و پیام صوتی را قبل از فرستادن امن کن',
+  pageTitle: 'Traceless (بی‌ردپا) · حذف متادیتا و لوکیشن عکس و پوشاندن صورت، بدون اینترنت',
+  pageDescription: 'رایگان، متن‌باز و کاملاً آفلاین: متادیتا (EXIF)، موقعیت مکانی (GPS) و مشخصات گوشی را از عکس، ویدیو و پیام صوتی پاک کنید و صورت، پلاک و نوشته را بپوشانید. هیچ فایلی آپلود نمی‌شود.',
   offlineBadge: 'بدون اینترنت کار می‌کند · هیچ فایلی از این دستگاه بیرون نمی‌رود',
   pick: 'انتخاب عکس یا ویدیو',
   pickHint: 'یا فایل را اینجا بکشید و رها کنید',
   groupCover: 'چه چیزهایی پوشانده شود',
   groupStyle: 'شکل پوشش',
-  styleNames: { smart: 'هوشمند (هم‌رنگ اطراف)', black: 'سیاه', brand: 'پاک‌کن', sticker: 'استیکر' },
+  styleNames: { smart: 'هوشمند (هم‌رنگ اطراف)', black: 'سیاه', brand: 'Traceless', sticker: 'استیکر' },
   groupSound: 'صدای ویدیو',
   groupMore: 'بیشتر',
   optFaces: 'پوشاندن صورت‌ها',
@@ -23,7 +53,7 @@ const fa = {
   optExtra: 'محافظت بیشتر در برابر شناختن دوربین',
   extraHint: 'با «محافظت بیشتر»، عکس کمی کوچک‌تر، خیلی کم کج و از لبه‌ها کمی بریده می‌شود و دانه‌های ریز تازه می‌گیرد، تا شناختن گوشی از روی الگوی نامرئی حسگرش خیلی سخت‌تر شود. کیفیت کمی پایین می‌آید.',
   extraApplied: 'محافظت بیشتر اعمال شد: عکس کوچک‌تر، کمی چرخانده و بریده شد.',
-  langSwitch: 'English',
+  langSwitch: 'زبان',
   statusReading: 'در حال خواندن فایل…',
   statusDetecting: 'در حال پیدا کردن چیزهایی که باید پوشانده شوند…',
   statusCleaning: 'در حال ساختن نسخهٔ امن…',
@@ -61,8 +91,8 @@ const fa = {
   coverStatusBar: 'پوشاندن نوار بالای صفحه (ساعت، اپراتور، اعلان‌ها)',
   holdToCompare: 'نگه دارید تا اصل را ببینید',
   coverChatHeader: 'پوشاندن سربرگ گفتگو (اسم و عکس مخاطب)',
-  takePhoto: 'عکس یا فیلم گرفتن با پاک‌کن',
-  takePhotoHint: 'عکسی که با پاک‌کن بگیرید معمولاً در گالری ذخیره نمی‌شود (بعضی برنامه‌های دوربین اندروید، به‌خصوص برای فیلم، ذخیره می‌کنند؛ گالری را چک کنید).',
+  takePhoto: 'عکس یا فیلم گرفتن با Traceless',
+  takePhotoHint: 'عکسی که با Traceless بگیرید معمولاً در گالری ذخیره نمی‌شود (بعضی برنامه‌های دوربین اندروید، به‌خصوص برای فیلم، ذخیره می‌کنند؛ گالری را چک کنید).',
   etaSoon: 'این مرحله کمتر از یک دقیقه دیگر تمام می‌شود.',
   etaMinutes: (n: string) => `این مرحله حدود ${n} دقیقهٔ دیگر طول می‌کشد.`,
   crowdCount: (n: string) => `دست‌کم ${n} نفر در این عکس دیده می‌شوند (تعداد صورت‌های پیدا شده؛ تعداد واقعی معمولاً بیشتر است).`,
@@ -106,7 +136,7 @@ const fa = {
   editorCropReset: 'بدون بریدن',
   editorCropHelp: 'روی عکس یک قاب بکشید؛ فقط داخل قاب نگه داشته می‌شود. برای پوشاندن دوباره «بریدن» را بزنید.',
   croppedNote: 'عکس بریده شد؛ فقط بخشی که انتخاب کردید در نسخهٔ امن است.',
-  limitsTitle: 'پاک‌کن چه چیزهایی را نمی‌تواند پنهان کند؟',
+  limitsTitle: 'Traceless چه چیزهایی را نمی‌تواند پنهان کند؟',
   limits: [
     'چیزهایی که در خود تصویر دیده می‌شود: تابلوها، ساختمان‌های آشنا، سایه‌ها، بازتاب در شیشه و عینک، لباس و خالکوبی.',
     'صورت یا پلاکی که برنامه پیدا نکرده باشد. پیدا کردن خودکار همیشه کامل نیست؛ قبل از فرستادن، خودتان عکس را نگاه کنید.',
@@ -123,7 +153,7 @@ const fa = {
     'پیام صوتی از نو ضبط می‌شود: اسم، تاریخ، مکان و عکس کاورِ فایل اصلی نمی‌ماند، و اگر بخواهید صدای گوینده هم تغییر می‌کند.',
     'همه‌چیز روی همین دستگاه انجام می‌شود. این صفحه اجازهٔ وصل شدن به هیچ سرور دیگری را ندارد.',
     'نام فایل خروجی تصادفی است.',
-    'پاک‌کن هیچ نسخه‌ای نگه نمی‌دارد: صفحه را که ببندید، همه‌چیز از حافظه پاک می‌شود. دکمهٔ سطل بالای صفحه همین کار را همان لحظه می‌کند.',
+    'Traceless هیچ نسخه‌ای نگه نمی‌دارد: صفحه را که ببندید، همه‌چیز از حافظه پاک می‌شود. دکمهٔ سطل بالای صفحه همین کار را همان لحظه می‌کند.',
   ],
   installIos: 'برای نصب روی آیفون: در سافاری دکمهٔ «اشتراک‌گذاری» و بعد «افزودن به صفحهٔ اصلی» را بزنید.',
   install: 'نصب برنامه',
@@ -171,7 +201,7 @@ const fa = {
   sealCode: 'کد مهر',
   openedExplain: 'این همان فایلی است که با این کد مهر شده بود و از آن زمان تغییر نکرده است.',
   forgetOpened: 'فراموش کردن (پاک کردن از حافظه)',
-  openSealedLink: 'باز کردن یک فایل مهروموم‌شده (.pakkon)',
+  openSealedLink: 'باز کردن یک فایل مهروموم‌شده (.traceless)',
   openedTitle: 'فایل اصلی سالم است و از زمان مهر دست نخورده ✓',
   openedName: 'نام اصلی',
   openedWhen: 'زمان مهروموم',
@@ -219,13 +249,13 @@ const fa = {
   audioVoiced: 'صدای گوینده تغییر کرد (بم‌تر). شنوندهٔ معمولی صدا را نمی‌شناسد، ولی کسی که تلاش کند ممکن است بخشی از تغییر را برگرداند.',
   audioKeptVoice: 'صدای گوینده تغییر نکرد؛ فقط اطلاعات پنهان پاک شد. برای تغییر صدا، «تغییر صدای آدم‌ها» را روشن کنید.',
   rebuildAudio: 'ساختن دوباره با تنظیمات جدید',
-  introTitle: 'به پاک‌کن خوش آمدید',
-  introSteps: ['عکس، ویدیو یا پیام صوتی را انتخاب کنید (یا از برنامهٔ دیگری با «اشتراک‌گذاری» بفرستید).', 'پاک‌کن اطلاعات پنهان را پاک می‌کند و صورت‌ها و پلاک‌ها را می‌پوشاند؛ همه روی همین گوشی، بدون اینترنت.', 'نسخهٔ امن را نگاه کنید و بفرستید. فایل اصلی را برای خودتان نگه دارید یا مهروموم کنید.'],
+  introTitle: 'به Traceless خوش آمدید',
+  introSteps: ['عکس، ویدیو یا پیام صوتی را انتخاب کنید (یا از برنامهٔ دیگری با «اشتراک‌گذاری» بفرستید).', 'Traceless اطلاعات پنهان را پاک می‌کند و صورت‌ها و پلاک‌ها را می‌پوشاند؛ همه روی همین گوشی، بدون اینترنت.', 'نسخهٔ امن را نگاه کنید و بفرستید. فایل اصلی را برای خودتان نگه دارید یا مهروموم کنید.'],
   introInstallIos: 'نصب روی آیفون: در سافاری دکمهٔ اشتراک‌گذاری (مربع با فلش رو به بالا) و بعد «Add to Home Screen» را بزنید.',
   introInstallAndroid: 'نصب روی اندروید: از منوی مرورگر «نصب برنامه» یا «افزودن به صفحهٔ اصلی» را بزنید.',
   introDone: 'فهمیدم',
   protectTitle: 'سطح محافظت',
-  updateReady: 'نسخهٔ تازهٔ پاک‌کن آماده است.',
+  updateReady: 'نسخهٔ تازهٔ Traceless آماده است.',
   updateReload: 'بارگذاری دوباره',
   itemsLabel: 'فایل‌های شما',
   openSettings: 'تنظیمات',
@@ -259,14 +289,16 @@ const fa = {
 export type Strings = typeof fa;
 
 const en: Strings = {
-  appName: 'Pakkon',
+  appName: 'Traceless',
   tagline: 'Make photos, videos and voice notes safe before you send them',
+  pageTitle: 'Traceless · Remove photo metadata and location, cover faces, offline',
+  pageDescription: 'Free, open-source and fully offline: remove EXIF metadata, GPS location and device details from photos, videos and voice notes, and cover faces, licence plates and text. Nothing is uploaded.',
   offlineBadge: 'Works offline · no file leaves this device',
   pick: 'Choose photo or video',
   pickHint: 'or drop files here',
   groupCover: 'What to cover',
   groupStyle: 'Cover look',
-  styleNames: { smart: 'Smart (matches the surroundings)', black: 'Black', brand: 'Pakkon', sticker: 'Sticker' },
+  styleNames: { smart: 'Smart (matches the surroundings)', black: 'Black', brand: 'Traceless', sticker: 'Sticker' },
   groupSound: 'Video sound',
   groupMore: 'More',
   optFaces: 'Cover faces',
@@ -278,7 +310,7 @@ const en: Strings = {
   optExtra: 'Extra protection against camera identification',
   extraHint: 'With extra protection the photo is made a bit smaller, turned very slightly, trimmed at the edges and given fresh fine grain, so recognising the phone from its invisible sensor pattern becomes much harder. Quality drops a little.',
   extraApplied: 'Extra protection applied: the photo was made smaller, slightly turned and trimmed.',
-  langSwitch: 'فارسی',
+  langSwitch: 'Language',
   statusReading: 'Reading the file…',
   statusDetecting: 'Looking for what to cover…',
   statusCleaning: 'Making the safe copy…',
@@ -316,8 +348,8 @@ const en: Strings = {
   coverStatusBar: 'Cover the status bar (time, carrier, notifications)',
   holdToCompare: 'Hold to see the original',
   coverChatHeader: 'Cover the chat header (contact name and picture)',
-  takePhoto: 'Take a photo or video with Pakkon',
-  takePhotoHint: 'Photos taken with Pakkon are usually not saved to your gallery (some Android camera apps do save them, especially videos; check your gallery).',
+  takePhoto: 'Take a photo or video with Traceless',
+  takePhotoHint: 'Photos taken with Traceless are usually not saved to your gallery (some Android camera apps do save them, especially videos; check your gallery).',
   etaSoon: 'This step will finish in under a minute.',
   etaMinutes: (n) => `This step needs about ${n} more min.`,
   crowdCount: (n) => `At least ${n} people are visible in this photo (faces found; the real number is usually higher).`,
@@ -361,7 +393,7 @@ const en: Strings = {
   editorCropReset: 'No crop',
   editorCropHelp: 'Drag a frame over the picture; only what is inside is kept. Tap “Crop” again to go back to covering.',
   croppedNote: 'The picture was cropped; only the part you chose is in the safe copy.',
-  limitsTitle: 'What can Pakkon not hide?',
+  limitsTitle: 'What can Traceless not hide?',
   limits: [
     'What is visible in the picture: signs, known buildings, shadows, reflections in windows and glasses, clothes and tattoos.',
     'A face or plate the app did not find. Automatic finding is never perfect; look at the picture yourself before sending.',
@@ -378,7 +410,7 @@ const en: Strings = {
     'A voice note is encoded again: the original’s title, date, place and cover picture do not carry over, and the voice can be changed too.',
     'Everything happens on this device. This page is not allowed to connect to any other server.',
     'Output file names are random.',
-    'Pakkon keeps no copies: when you close the page, everything is gone from memory. The bin button at the top does it at once.',
+    'Traceless keeps no copies: when you close the page, everything is gone from memory. The bin button at the top does it at once.',
   ],
   installIos: 'To install on iPhone: in Safari tap “Share”, then “Add to Home Screen”.',
   install: 'Install app',
@@ -426,7 +458,7 @@ const en: Strings = {
   sealCode: 'Seal code',
   openedExplain: 'This is the file that was sealed with this code, unchanged since then.',
   forgetOpened: 'Forget (remove from memory)',
-  openSealedLink: 'Open a sealed file (.pakkon)',
+  openSealedLink: 'Open a sealed file (.traceless)',
   openedTitle: 'The original is intact and unchanged since sealing ✓',
   openedName: 'Original name',
   openedWhen: 'Sealed at',
@@ -474,13 +506,13 @@ const en: Strings = {
   audioVoiced: 'The speaker’s voice was changed (lower). Casual listeners will not recognise it, but someone who tries may partly undo it.',
   audioKeptVoice: 'The voice was not changed; only hidden data was removed. Switch on “Change voices” to change it.',
   rebuildAudio: 'Make again with the new settings',
-  introTitle: 'Welcome to Pakkon',
-  introSteps: ['Choose a photo, video or voice note (or send it from another app with “Share”).', 'Pakkon removes hidden data and covers faces and plates; all on this phone, without internet.', 'Look at the safe copy and send it. Keep the original for yourself, or seal it.'],
+  introTitle: 'Welcome to Traceless',
+  introSteps: ['Choose a photo, video or voice note (or send it from another app with “Share”).', 'Traceless removes hidden data and covers faces and plates; all on this phone, without internet.', 'Look at the safe copy and send it. Keep the original for yourself, or seal it.'],
   introInstallIos: 'Install on iPhone: in Safari tap the Share button (square with an arrow), then “Add to Home Screen”.',
   introInstallAndroid: 'Install on Android: in the browser menu choose “Install app” or “Add to Home screen”.',
   introDone: 'Got it',
   protectTitle: 'Protection level',
-  updateReady: 'A new version of Pakkon is ready.',
+  updateReady: 'A new version of Traceless is ready.',
   updateReload: 'Reload',
   itemsLabel: 'Your files',
   openSettings: 'Settings',
@@ -511,7 +543,262 @@ const en: Strings = {
   dataCredit: 'Place list: GeoNames (CC BY 4.0)',
 };
 
-export const STRINGS: Record<Lang, Strings> = { fa, en };
+const tr: Strings = {
+  appName: 'Traceless',
+  tagline: 'Fotoğrafları, videoları ve sesli mesajları göndermeden önce güvenli hâle getirin',
+  pageTitle: 'Traceless · Fotoğraftan meta veri ve konum silme, yüz gizleme, internetsiz',
+  pageDescription: 'Ücretsiz, açık kaynak ve tamamen internetsiz: fotoğraf, video ve sesli mesajlardan EXIF meta verisini, GPS konumunu ve cihaz bilgilerini silin; yüzleri, plakaları ve yazıları kapatın. Hiçbir şey yüklenmez.',
+  offlineBadge: 'İnternetsiz çalışır · hiçbir dosya bu cihazdan çıkmaz',
+  pick: 'Fotoğraf veya video seçin',
+  pickHint: 'ya da dosyaları buraya sürükleyip bırakın',
+  groupCover: 'Neler kapatılsın',
+  groupStyle: 'Kapatma görünümü',
+  styleNames: { smart: 'Akıllı (çevreyle uyumlu renk)', black: 'Siyah', brand: 'Traceless', sticker: 'Çıkartma' },
+  groupSound: 'Video sesi',
+  groupMore: 'Diğer',
+  optFaces: 'Yüzleri kapat',
+  optPlates: 'Araç plakalarını kapat',
+  optText: 'Yazıları kapat (tabelalar, isimler, numaralar)',
+  optPeople: 'İnsanları tamamen kapat (vücut, kıyafet, saç)',
+  optVoice: 'Sesleri değiştir (daha kalın; sıradan dinleyiciye karşı)',
+  optMute: 'Sesi tamamen kaldır',
+  optExtra: 'Kamera tanınmasına karşı ek koruma',
+  extraHint: 'Ek korumayla fotoğraf biraz küçültülür, çok az döndürülür, kenarlarından biraz kırpılır ve yeni ince bir gren eklenir; böylece telefonu sensörünün görünmez deseninden tanımak çok daha zorlaşır. Kalite biraz düşer.',
+  extraApplied: 'Ek koruma uygulandı: fotoğraf küçültüldü, hafifçe döndürüldü ve kırpıldı.',
+  langSwitch: 'Dil',
+  statusReading: 'Dosya okunuyor…',
+  statusDetecting: 'Kapatılacak şeyler aranıyor…',
+  statusCleaning: 'Güvenli kopya hazırlanıyor…',
+  statusLoadingModels: 'İlk seferde biraz daha uzun sürer…',
+  statusReady: 'Güvenli kopya hazır',
+  share: 'Güvenli kopyayı gönder',
+  save: 'Güvenli kopyayı kaydet',
+  shareAll: 'Hepsini gönder',
+  editMasks: 'Kapatmaları düzenle',
+  remove: 'Listeden kaldır',
+  revealedTitle: 'Bu dosya şunları açığa çıkarıyordu:',
+  revealedNone: 'Gizli bilgi bulunamadı. Yine de yeni bir kopya hazırlandı.',
+  removedNote: 'Bunların hepsi güvenli kopyadan silindi.',
+  partialNote: 'Dosyanın bir kısmı okunamadı; güvenli kopya sıfırdan oluşturuldu ve özgün dosyadan hiçbir şey içermiyor.',
+  masksSummary: (faces, plates, manual, texts, people) =>
+    `${faces} yüz, ${plates} plaka` +
+    (texts !== undefined ? `, ${texts} yazı` : '') +
+    (people !== undefined ? `, ${people} kişi` : '') +
+    ' kapatıldı' +
+    (manual ? ` (+${manual} elle)` : ''),
+  checkPicture: 'Lütfen resme bakın: bir yüz veya plaka gözden kaçtıysa “Kapatmaları düzenle”ye dokunun. Gerekmeyen bir kapatmayı orada tek dokunuşla kaldırın.',
+  videoCovered: (what) => `Her karede kapatıldı: ${what}. Lütfen videonun tamamını izleyin; gözden kaçan bir şey varsa göndermeyin.`,
+  kindNames: { faces: 'yüzler', plates: 'plakalar', text: 'yazılar', people: 'insanlar' },
+  listJoin: ', ',
+  videoUncovered: (what) => `Kapatılmadı (kapalıydı): ${what}.`,
+  videoMasksOff: 'Yüz ve plaka kapatma kapalıydı; yalnızca gizli bilgiler silindi.',
+  videoMasksUnavailable: 'Seçiminiz üzerine yalnızca gizli bilgiler silindi; bu videodaki yüzler ve plakalar kapatılmadı.',
+  cancel: 'İptal',
+  videoMuted: 'Ses kaldırıldı.',
+  videoVoiced: 'Sesler daha kalın ve tanınmaz hâle getirildi. Bu, sıradan bir dinleyicinin sesi tanımasını zorlaştırır; ama uğraşan biri bunu kısmen geri alabilir. Kelimeler ve aksan değişmez. Bir sesin kesinlikle tanınmaması gerekiyorsa sesi tamamen kaldırın.',
+  videoNoSound: 'Bu videoda ses yok (ya da sesi bu cihazda okunamadığı için dışarıda bırakıldı).',
+  errVoice: 'Bu tarayıcı sesi değiştiremiyor, bu yüzden video hazırlanmadı. Ses tamamen kaldırılsın mı, yoksa özgün sesler kalsın mı?',
+  voiceInsteadMute: 'Sesi tamamen kaldır',
+  voiceKeep: 'Özgün sesler kalsın',
+  coverStatusBar: 'Durum çubuğunu kapat (saat, operatör, bildirimler)',
+  holdToCompare: 'Özgününü görmek için basılı tutun',
+  coverChatHeader: 'Sohbet başlığını kapat (kişinin adı ve resmi)',
+  takePhoto: 'Traceless ile fotoğraf veya video çekin',
+  takePhotoHint: 'Traceless ile çekilen fotoğraflar genellikle galeriye kaydedilmez (bazı Android kamera uygulamaları, özellikle videoları kaydeder; galerinizi kontrol edin).',
+  etaSoon: 'Bu adım bir dakikadan kısa sürede bitecek.',
+  etaMinutes: (n) => `Bu adımın bitmesine yaklaşık ${n} dakika var.`,
+  crowdCount: (n) => `Bu fotoğrafta en az ${n} kişi görünüyor (bulunan yüz sayısı; gerçek sayı genellikle daha fazladır).`,
+  riskText: 'Bu fotoğrafta, nerede çekildiğini gösterebilecek kapatılmamış yazı veya tabela var.',
+  riskPlates: 'Bir araç plakası kapatılmamış.',
+  riskUnchecked: 'Bu fotoğraf yazı ve tabela için kontrol edilemedi; lütfen kendiniz bakın.',
+  rebuildVideo: 'Geçerli ayarlarla yeniden hazırla',
+  errorDetails: 'Teknik ayrıntılar (sorunu bildirmek için)',
+  errVideoMask: 'Bu cihazda bu videodaki yüzler ve plakalar kapatılamadı, bu yüzden kopya hazırlanmadı. Güncel bir Chrome veya Safari’de yeniden deneyin ya da yalnızca gizli bilgileri silin (yüzler kapatılmaz).',
+  continueWithout: 'Yüzleri kapatmadan yalnızca gizli bilgileri sil',
+  reviewNeeded: 'Otomatik bulma tamamlanamadı, bu yüzden bu kopya henüz gönderilmeye hazır değil. Yüzleri, plakaları ve yazıları “Kapatmaları düzenle” ile kendiniz kapatın ya da kapatılacak bir şey yoksa onaylayın.',
+  useAnyway: 'Kapatılacak bir şey yok; kopyayı göster',
+  checklistTitle: 'Göndermeden önce bunları kendiniz kontrol edin',
+  checklist: [
+    'Uzaktaki, bulanık, profilden görünen veya kısmen gizli yüzler; aynada, camda veya gözlükte yansıyan yüzler.',
+    'Sokak ve dükkân tabelaları, sokak adları, kapı numaraları, tanınan binalar veya manzaralar.',
+    'Yazılar: kimlik kartları, mektuplar, telefon veya bilgisayar ekranları, kıyafetlerdeki isimler.',
+    'Bir kişiyi tanıtabilecek dövmeler, alışılmadık kıyafetler veya çantalar.',
+    'Gölgeler ve gökyüzü: gölgelerin yönü ve uzunluğu saati ve yeri ele verir.',
+    'Ekran görüntülerinde: sizin ve başkalarının adları ve profil resimleri, üstteki saat ve operatör.',
+    'Videolarda: sesler, söylenen isimler ve ortam sesleri (ezan, siren, anonslar).',
+  ],
+  errCancelled: 'İptal edildi.',
+  videoDropped: (n) => `${n} ek iz (örneğin GPS izi veya altyazı) kaldırıldı.`,
+  nearPlace: (place, km) => `${place} yakını (yaklaşık ${km} km)`,
+  errUnsupported: 'Bu tarayıcı bu dosya türünü açamıyor. iPhone HEIC fotoğrafıysa Safari’de açın veya önce JPEG’e dönüştürün.',
+  errTooLarge: 'Bu dosya, bu cihazın belleği için çok büyük. Videoyu telefonda kısaltın (veya daha fazla belleği olan bir cihazda deneyin); çok büyük resimleri önce küçültün.',
+  errLeftovers: 'Güvenliğiniz için kopya verilmedi: son kontrol, olmaması gereken bir şey buldu. Lütfen bu sorunu bildirin.',
+  errAudio: 'Bu ses kaydı yeniden oluşturulamadı, bu yüzden dosya hazırlanmadı. Bozuk olabilir ya da bu tarayıcı biçimini okuyamıyor olabilir.',
+  audioPictureDropped: 'Bu dosyada bir resim de vardı; yalnızca ses tutuldu.',
+  audioMuteMeansVoice: 'Sesli mesajda sesi tamamen kaldırmak geriye hiçbir şey bırakmaz; bunun yerine konuşanın sesi değiştirildi.',
+  errVideo: 'Bu video yeniden oluşturulamadı. Biçimi desteklenmiyor olabilir.',
+  errDetect: 'Yüz ve plakaları otomatik bulma başarısız oldu. “Kapatmaları düzenle” ile elle kapatabilirsiniz.',
+  errGeneric: 'Bir sorun oluştu. Özgün dosyanız olduğu gibi duruyor.',
+  editorTitle: 'Kapatmaları düzenle',
+  editorHelp: 'Bir alanı kapatmak için resmin üzerinde sürükleyin. Kaldırmak için bir kapatmaya dokunun.',
+  editorDone: 'Tamam',
+  editorCancel: 'Vazgeç',
+  editorUndo: 'Geri al',
+  editorCrop: 'Kırp',
+  editorCropReset: 'Kırpma yok',
+  editorCropHelp: 'Resmin üzerine bir çerçeve çizin; yalnızca içindeki kısım tutulur. Kapatmaya dönmek için “Kırp”a yeniden dokunun.',
+  croppedNote: 'Resim kırpıldı; güvenli kopyada yalnızca seçtiğiniz kısım var.',
+  limitsTitle: 'Traceless neleri gizleyemez?',
+  limits: [
+    'Resimde görünenler: tabelalar, tanınan binalar, gölgeler, camlarda ve gözlüklerde yansımalar, kıyafetler ve dövmeler.',
+    'Uygulamanın bulamadığı bir yüz veya plaka. Otomatik bulma hiçbir zaman kusursuz değildir; göndermeden önce resme kendiniz bakın.',
+    'Kamera sensörünün izi: her kamera, aynı telefonun başka fotoğraflarıyla karşılaştırılarak tanınabilecek silik ve görünmez bir desen bırakır. “Ek koruma” bunu çok zorlaştırır ama imkânsız kılmaz.',
+    'Videolarda yüzler, plakalar ve yazılar yalnızca videoyu yeniden oluşturabilen cihazlarda kapatılır.',
+    'Değiştirilmiş ses sıradan dinleyiciyi durdurur, araçlarla uğraşan birini değil; kelimeler, aksan ve ortam sesleri kalır. Emin olmak için sesi kaldırın.',
+    'Daha önce bir yere gönderdiğiniz kopyalar etkilenmez.',
+  ],
+  howTitle: 'Nasıl çalışır?',
+  how: [
+    'Fotoğraf piksel renklerinden yeniden çizilir; özgün dosyadan hiçbir şey (konum, telefon modeli, saat, gizli küçük resim, düzenleme geçmişi) yeni dosyaya geçmez.',
+    'Yüzler ve plakalar bulanıklaştırmayla değil düz renkle kapatılır; çünkü bulanıklık bazen geri alınabilir.',
+    'Video yeniden oluşturulur: yalnızca görüntü ve ses kalır, yüzler ve plakalar her karede kapatılır.',
+    'Sesli mesaj yeniden kodlanır: özgün dosyanın başlığı, tarihi, yeri ve kapak resmi aktarılmaz; istenirse ses de değiştirilir.',
+    'Her şey bu cihazda olur. Bu sayfanın başka hiçbir sunucuya bağlanmasına izin verilmez.',
+    'Çıktı dosyalarının adları rastgeledir.',
+    'Traceless hiçbir kopya saklamaz: sayfayı kapattığınızda her şey bellekten silinir. Üstteki çöp kutusu düğmesi bunu hemen yapar.',
+  ],
+  installIos: 'iPhone’a yüklemek için: Safari’de “Paylaş”a, ardından “Ana Ekrana Ekle”ye dokunun.',
+  install: 'Uygulamayı yükle',
+  offlineReady: 'İnternetsiz çalışmaya hazır',
+  sharedReceived: 'Paylaşılan dosyalar alındı',
+  findings: {
+    gps: 'Tam konum (GPS koordinatları)',
+    videoLocation: 'Videonun kaydedildiği tam konum',
+    cityName: 'Şehir veya yer adı',
+    deviceModel: 'Telefon veya kamera modeli',
+    serialNumber: 'Cihaz seri numarası',
+    lens: 'Lens modeli',
+    software: 'Yazılım veya sistem sürümü',
+    dateTaken: 'Tarih ve saat',
+    timeZone: 'Saat dilimi',
+    owner: 'Sahibin veya fotoğrafçının adı',
+    uniqueId: 'Fotoğrafın benzersiz kimliği',
+    thumbnail: 'Gizli küçük bir resim (belki kırpmadan önceki hâli)',
+    editHistory: 'Düzenleme geçmişi',
+    xmp: 'Gizli metin verisi (XMP)',
+    iptc: 'Gizli haber verisi (IPTC)',
+    contentCredentials: 'Cihaz ayrıntıları içeren içerik kimliği (C2PA)',
+    comment: 'Gizli not',
+    makerNotes: 'Kamera üreticisinin özel notları',
+    motionPhoto: 'Gizli kısa bir video (hareketli fotoğraf)',
+    trailingData: 'Resmin bitişinden sonra ek veri',
+    extraImages: 'Gizli ek resimler',
+    colorProfile: 'Renk profili',
+    textChunks: 'Gizli metin',
+    extraTracks: 'Ek veri izi (örneğin GPS izi veya altyazı)',
+    otherMetadata: 'Diğer gizli bilgiler',
+  },
+  sealOriginal: 'Özgün dosyayı mühürle',
+  sealTitle: 'Özgün dosyayı mühürle',
+  sealExplain: 'Özgün dosya (tüm bilgileriyle) parolanızla kilitlenir ve ona bir “mühür kodu” verilir. Daha sonra mühürlü dosya ve parola, bunun o zaman mühürlediğiniz ve o günden beri değişmemiş dosya olduğunu gösterir. (Mühürlemeden önce düzenlenmediğini kanıtlamaz; mühür zamanı bu cihazın saatinden alınır.) Mühürlü dosyayı güvenli bir yerde tutun ve göndermeyin. Parolayı unutursanız açmanın hiçbir yolu yoktur.',
+  sealDo: 'Mühürle',
+  sealOpen: 'Aç',
+  openSealTitle: 'Mühürlü dosyayı aç',
+  openSealExplain: 'Mühürlerken seçtiğiniz parolayı girin.',
+  passphrase: 'Parola (en az 10 karakter)',
+  passphraseAgain: 'Parola tekrar',
+  passphraseShort: 'Parola en az 10 karakter olmalı.',
+  passphraseMismatch: 'İki parola aynı değil.',
+  sealedDone: 'Özgün dosya mühürlendi. Mühür kodu (not etmesi veya yayımlaması güvenlidir; mühürlü dosya olmadan özgün dosyayla ilişkilendirilemez):',
+  sealCode: 'Mühür kodu',
+  openedExplain: 'Bu, bu kodla mühürlenen ve o zamandan beri değişmemiş dosyadır.',
+  forgetOpened: 'Unut (bellekten sil)',
+  openSealedLink: 'Mühürlü bir dosyayı aç (.traceless)',
+  openedTitle: 'Özgün dosya sağlam ve mühürlendiğinden beri değişmemiş ✓',
+  openedName: 'Özgün ad',
+  openedWhen: 'Mühürlenme zamanı',
+  saveOriginal: 'Özgün dosyayı kaydet (tüm bilgileriyle)',
+  makeSafeFromOriginal: 'Ondan güvenli bir kopya hazırla',
+  errWrongPass: 'Parola yanlış ya da dosya değiştirilmiş.',
+  errSealDamaged: 'Bu mühürlü dosya bozuk.',
+  errSealTooLarge: 'Bu dosya bu cihazda mühürlenemeyecek kadar büyük.',
+  hintsTitle: 'Düzenleme belirtileri (ipucu, kanıt değil):',
+  hints: {
+    editingSoftware: 'Fotoğraf düzenleme yazılımıyla kaydedilmiş',
+    dateMismatch: 'Çekildiği zamandan farklı bir zamanda değiştirilmiş',
+    thumbnailDiffers: 'Gizli küçük resim başka bir şey gösteriyor; fotoğraf çekildikten sonra kırpılmış veya düzenlenmiş',
+    noCameraData: 'Hiç kamera bilgisi yok; muhtemelen yeniden kaydedilmiş, düzenlenmiş veya bir mesajlaşma uygulamasıyla gelmiş',
+  },
+  pickAny: 'Fotoğraf, video veya sesli mesaj seçin',
+  heroTitle: 'Göndermeden önce temizleyin',
+  heroText: 'Konum, telefon modeli ve zaman silinir; yüzler ve plakalar kapatılır. Hepsi bu cihazda.',
+  optLight: 'Daha küçük dosyalar (yavaş internet için)',
+  optAutoWipe: 'Uygulamadan çıktıktan 5 dakika sonra her şeyi unut',
+  groupSoundAll: 'Ses (videolar ve sesli mesajlar)',
+  themeNames: { system: 'Görünüm: otomatik', light: 'Görünüm: açık', dark: 'Görünüm: koyu' },
+  wipe: 'Her şeyi bellekten sil',
+  wiped: 'Her şey uygulamanın belleğinden silindi.',
+  saveZip: 'Hepsini tek ZIP dosyası olarak kaydet',
+  sizeLine: (before, after) => `Boyut: ${before} → ${after}`,
+  lightApplied: 'Küçültüldü.',
+  lightUnavailable: 'Bu cihaz videoyu küçültemiyor; tam boyutta hazırlandı.',
+  dragToCompare: 'Özgününü görmek için sürükleyin',
+  units: { kb: 'KB', mb: 'MB' },
+  report: {
+    location: 'Konum silindi',
+    device: 'Cihaz bilgileri silindi',
+    time: 'Zaman silindi',
+    other: 'Gizli bilgiler silindi',
+    clean: 'Gizli bilgi bulunamadı',
+    faces: (n) => `${n} yüz kapatıldı`,
+    plates: (n) => `${n} plaka kapatıldı`,
+    texts: (n) => `${n} yazı kapatıldı`,
+    people: (n) => `${n} kişi kapatıldı`,
+    voice: 'Ses değiştirildi',
+    muted: 'Ses kaldırıldı',
+  },
+  filmstripTitle: 'Videoya hızlı bakış: o ana gitmek için bir kareye dokunun',
+  audioVoiced: 'Konuşanın sesi değiştirildi (daha kalın). Sıradan dinleyiciler tanımaz; ama uğraşan biri bunu kısmen geri alabilir.',
+  audioKeptVoice: 'Ses değiştirilmedi; yalnızca gizli bilgiler silindi. Değiştirmek için “Sesleri değiştir”i açın.',
+  rebuildAudio: 'Yeni ayarlarla yeniden hazırla',
+  introTitle: 'Traceless’e hoş geldiniz',
+  introSteps: ['Bir fotoğraf, video veya sesli mesaj seçin (ya da başka bir uygulamadan “Paylaş” ile gönderin).', 'Traceless gizli bilgileri siler, yüzleri ve plakaları kapatır; hepsi bu telefonda, internetsiz.', 'Güvenli kopyaya bakın ve gönderin. Özgün dosyayı kendinize saklayın ya da mühürleyin.'],
+  introInstallIos: 'iPhone’a yükleme: Safari’de Paylaş düğmesine (oklu kare), ardından “Ana Ekrana Ekle”ye dokunun.',
+  introInstallAndroid: 'Android’e yükleme: tarayıcı menüsünden “Uygulamayı yükle” veya “Ana ekrana ekle”yi seçin.',
+  introDone: 'Anladım',
+  protectTitle: 'Koruma düzeyi',
+  updateReady: 'Traceless’in yeni sürümü hazır.',
+  updateReload: 'Yeniden yükle',
+  itemsLabel: 'Dosyalarınız',
+  openSettings: 'Ayarlar',
+  settingsTitle: 'Koruma ayarları',
+  settingsDone: 'Tamam',
+  presets: {
+    standard: { name: 'Standart', text: 'Yüzler ve plakalar kapatılır; gizli bilgiler her zaman silinir.' },
+    strong: { name: 'Güçlü', text: 'Ayrıca yazılar, ses değiştirme ve kamera eşleştirmeye karşı koruma.' },
+    max: { name: 'En yüksek', text: 'Ayrıca insanlar tamamen kapatılır ve ses kaldırılır.' },
+    custom: { name: 'Özel', text: 'Kendi seçtiğiniz bileşim.' },
+  },
+  summaryOn: (items) => `Açık: ${items}`,
+  summaryNames: { faces: 'yüzler', plates: 'plakalar', text: 'yazılar', people: 'insanlar', voice: 'ses değiştirme', mute: 'sessiz', extra: 'kamera koruması', light: 'küçük dosyalar', autoWipe: 'otomatik unutma' },
+  moreActions: 'Daha fazla',
+  findingsSummary: (n, top) => `Bu dosya ${n} şeyi açığa çıkarıyordu${top ? `; bunlardan biri: ${top}` : ''}`,
+  checkShort: 'Güvenli kopyaya bir kez göz atın; gözden kaçan bir şey varsa “Kapatmaları düzenle”ye dokunun.',
+  trimOpen: 'Videoyu kes',
+  trimTitle: 'Yalnızca bu kısım kalsın',
+  trimStart: 'Başlangıç',
+  trimEnd: 'Bitiş',
+  trimApply: 'Bu kısımla hazırla',
+  trimReset: 'Videonun tamamı',
+  trimmedNote: (from, to) => `Yalnızca ${from} ile ${to} arası tutuldu; videonun geri kalanı güvenli kopyada yok.`,
+  trimChip: 'Kesildi',
+  errTrim: 'Bu cihazda video kesilemiyor, bu yüzden dosya hazırlanmadı. Bunun yerine videonun tamamını hazırlayabilirsiniz.',
+  footer: 'Pouyam’dan özgür ve açık kaynaklı yazılım',
+  sourceCode: 'Kaynak kod',
+  dataCredit: 'Yer listesi: GeoNames (CC BY 4.0)',
+};
+
+export const STRINGS: Record<Lang, Strings> = { en, fa, tr };
 
 export function toFaDigits(n: number | string): string {
   return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]!);
@@ -519,6 +806,18 @@ export function toFaDigits(n: number | string): string {
 
 export function formatNumber(lang: Lang, n: number | string): string {
   return lang === 'fa' ? toFaDigits(n) : String(n);
+}
+
+/** Formats a whole or decimal number the way the language writes it (Persian digits for Persian). */
+export function numberFormat(lang: Lang, options?: Intl.NumberFormatOptions): Intl.NumberFormat {
+  return new Intl.NumberFormat(lang === 'fa' ? 'fa-IR' : lang === 'tr' ? 'tr-TR' : 'en-US', options);
+}
+
+/** "42%" in English, "%42" in Turkish, "۴۲٪" in Persian. */
+export function percent(lang: Lang, n: number): string {
+  if (lang === 'fa') return `${toFaDigits(n)}٪`;
+  if (lang === 'tr') return `%${n}`;
+  return `${n}%`;
 }
 
 export function countryName(lang: Lang, code: string): string {
