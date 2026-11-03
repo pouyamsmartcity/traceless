@@ -1,0 +1,26 @@
+{
+  "name": "Pakkon · پاک‌کن",
+  "short_name": "Pakkon",
+  "description": "Make photos, videos and voice notes safe to share, fully offline: remove hidden location, device and time data, cover faces and licence plates, change voices.",
+  "lang": "fa",
+  "dir": "auto",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f6f4",
+  "theme_color": "#126354",
+  "categories": ["photo", "utilities", "security"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "./share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [{ "name": "media", "accept": ["image/*", "video/*", "audio/*", ".jpg", ".jpeg", ".png", ".heic", ".webp", ".mp4", ".mov", ".m4a", ".mp3", ".ogg", ".opus", ".oga"] }]
+    }
+  }
+}

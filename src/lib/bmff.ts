@@ -1,0 +1,382 @@
+import { FormatError, ascii, u32be, u64be, utf8, type ByteSource } from './bytes';
+import { FindingList, parseIso6709, type Finding } from './findings';
+
+/**
+ * Minimal ISO base media file (MP4 / MOV / 3GP) reader: enough to find what a video reveals and to
+ * double-check a cleaned file. It never loads the media data (mdat) into memory.
+ */
+
+export interface Box {
+  type: string;
+  /** Offset of the box header in its buffer. */
+  start: number;
+  headerSize: number;
+  size: number;
+}
+
+/** Boxes whose payload is a list of child boxes. */
+const CONTAINERS = new Set(['moov', 'trak', 'mdia', 'minf', 'stbl', 'udta', 'edts', 'dinf', 'ilst', 'mvex', 'moof', 'traf', 'tref', 'meta']);
+
+export function readBoxes(b: Uint8Array, start: number, end: number): Box[] {
+  const boxes: Box[] = [];
+  let o = start;
+  while (o + 8 <= end) {
+    let size = u32be(b, o);
+    const type = ascii(b, o + 4, 4);
+    let headerSize = 8;
+    if (size === 1) {
+      size = u64be(b, o + 8);
+      headerSize = 16;
+    } else if (size === 0) {
+      size = end - o;
+    }
+    if (size < headerSize || o + size > end) throw new FormatError(`bad box ${JSON.stringify(type)}`);
+    boxes.push({ type, start: o, headerSize, size });
+    o += size;
+  }
+  return boxes;
+}
+
+/**
+ * 'meta' is a FullBox in ISO files (4 extra bytes) but a plain container in QuickTime files.
+ * Returns the offset where its children start.
+ */
+function metaChildrenStart(b: Uint8Array, box: Box): number {
+  const p = box.start + box.headerSize;
+  if (p + 8 <= box.start + box.size) {
+    const maybeChildType = ascii(b, p + 4, 4);
+    if (/^[a-z]{4}$/.test(maybeChildType) && u32be(b, p) >= 8) return p; // QuickTime style
+  }
+  return p + 4;
+}
+
+export function children(b: Uint8Array, box: Box): Box[] {
+  const start = box.type === 'meta' ? metaChildrenStart(b, box) : box.start + box.headerSize;
+  return readBoxes(b, start, box.start + box.size);
+}
+
+export function payload(b: Uint8Array, box: Box): Uint8Array {
+  return b.subarray(box.start + box.headerSize, box.start + box.size);
+}
+
+/** Calls `visit` for every box in the tree under `boxes`, depth-first, with its path like "moov/trak/mdia". */
+export function walk(b: Uint8Array, boxes: Box[], visit: (box: Box, path: string) => void, path = '', strict = false): void {
+  for (const box of boxes) {
+    const p = path ? `${path}/${box.type}` : box.type;
+    visit(box, p);
+    if (CONTAINERS.has(box.type)) {
+      let kids: Box[] = [];
+      try {
+        kids = children(b, box);
+      } catch (e) {
+        // When inspecting a user's file, read what we can. When verifying our own output, fail.
+        if (strict) throw e;
+      }
+      walk(b, kids, visit, p, strict);
+    }
+  }
+}
+
+/** The only boxes our cleaned MP4 files may contain. Anything else fails the final check. */
+const OUTPUT_BOXES = new Set([
+  'ftyp', 'moov', 'mdat', 'free', 'mvhd', 'trak', 'tkhd', 'edts', 'elst', 'mdia', 'mdhd', 'hdlr', 'minf',
+  'vmhd', 'smhd', 'dinf', 'dref', 'stbl', 'stsd', 'stts', 'ctts', 'cslg', 'stsc', 'stsz', 'stz2', 'stco',
+  'co64', 'stss', 'sdtp', 'sgpd', 'sbgp',
+]);
+const OUTPUT_HANDLERS = new Set(['', 'MediabunnyVideoHandler', 'MediabunnySoundHandler']);
+
+/**
+ * Strict structural check of one of our own output files: only known boxes, no names, readable throughout.
+ * Returns a list of problems (empty when the file only holds what a plain video needs).
+ */
+export function outputBoxProblems(file: Uint8Array): string[] {
+  const problems: string[] = [];
+  try {
+    const top = readBoxes(file, 0, file.length);
+    walk(
+      file,
+      top,
+      (box, path) => {
+        if (!OUTPUT_BOXES.has(box.type)) problems.push(`unexpected box ${path}`);
+        if (box.type === 'hdlr') {
+          const p = payload(file, box);
+          const name = p.length > 24 ? utf8(p.subarray(24)).replace(/\0+$/, '') : '';
+          if (!OUTPUT_HANDLERS.has(name)) problems.push(`handler name "${name}"`);
+        }
+        if (box.type === 'mdhd') {
+          const p = payload(file, box);
+          const lang = p[0] === 1 ? 32 : 20;
+          // Packed ISO-639 code: 0x55c4 is "und" (undetermined). A real language could hint at the author.
+          if (p.length >= lang + 2 && ((p[lang]! << 8) | p[lang + 1]!) !== 0x55c4) problems.push('track language set');
+        }
+      },
+      '',
+      true,
+    );
+  } catch (e) {
+    problems.push(`unreadable structure: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return problems;
+}
+
+const MAX_TOP_BOXES = 4096;
+
+/** Reads the top-level box headers of a file, then loads only 'moov' (and small metadata boxes). */
+export async function loadMovieHeader(src: ByteSource): Promise<{ top: Box[]; moov: Uint8Array; moovBoxes: Box[]; extras: string[] }> {
+  const top: Box[] = [];
+  const extras: string[] = [];
+  let moov: Uint8Array | undefined;
+  let o = 0;
+  while (o + 8 <= src.size) {
+    // Real files have a handful of top-level boxes; a flood of tiny boxes is a hostile file.
+    if (top.length >= MAX_TOP_BOXES) throw new FormatError('too many top-level boxes');
+    const h = await src.read(o, 16);
+    let size = u32be(h, 0);
+    const type = ascii(h, 4, 4);
+    let headerSize = 8;
+    if (size === 1) {
+      size = u64be(h, 8);
+      headerSize = 16;
+    } else if (size === 0) size = src.size - o;
+    if (size < headerSize || o + size > src.size) throw new FormatError(`bad top-level box ${JSON.stringify(type)}`);
+    top.push({ type, start: o, headerSize, size });
+    if (type === 'moov') {
+      if (size > 256 * 1024 * 1024) throw new FormatError('moov too large');
+      moov = await src.read(o, size);
+    } else if (!['ftyp', 'mdat', 'free', 'skip', 'wide', 'pnot'].includes(type)) {
+      extras.push(type);
+    }
+    o += size;
+  }
+  if (!moov) throw new FormatError('no moov box');
+  return { top, moov, moovBoxes: readBoxes(moov, 0, moov.length), extras };
+}
+
+/** Seconds between 1904-01-01 (QuickTime epoch) and 1970-01-01. */
+const QT_EPOCH = 2082844800;
+
+function readTimes(b: Uint8Array, box: Box): number {
+  const p = box.start + box.headerSize;
+  const version = b[p]!;
+  return version === 1 ? u64be(b, p + 4) : u32be(b, p + 4);
+}
+
+function dataBoxValue(b: Uint8Array, box: Box): string | undefined {
+  // An ilst item holds a 'data' box: type indicator (4) + locale (4) + value.
+  for (const c of children(b, box)) {
+    if (c.type !== 'data') continue;
+    const p = payload(b, c);
+    if (p.length < 8) return undefined;
+    const typeIndicator = u32be(p, 0) & 0xffffff;
+    if (typeIndicator === 1 || typeIndicator === 2 || typeIndicator === 0) return utf8(p.subarray(8));
+    return undefined;
+  }
+  return undefined;
+}
+
+/** Text of a QuickTime '©xxx' user-data string: 2-byte length + 2-byte language + text. */
+function qtString(b: Uint8Array, box: Box): string | undefined {
+  const p = payload(b, box);
+  if (p.length >= 4) {
+    const n = (p[0]! << 8) | p[1]!;
+    if (n > 0 && 4 + n <= p.length) return utf8(p.subarray(4, 4 + n));
+  }
+  return undefined;
+}
+
+const KEY_FINDINGS: [RegExp, Parameters<FindingList['add']>[0]][] = [
+  [/location/i, 'videoLocation'],
+  [/(make|model)$/i, 'deviceModel'],
+  [/software|encoder/i, 'software'],
+  [/creationdate|date/i, 'dateTaken'],
+  [/author|artist|owner|copyright/i, 'owner'],
+  [/serial/i, 'serialNumber'],
+  [/comment|description/i, 'comment'],
+];
+
+const UDTA_FINDINGS: Record<string, Parameters<FindingList['add']>[0]> = {
+  '©mak': 'deviceModel',
+  '©mod': 'deviceModel',
+  '©swr': 'software',
+  '©too': 'software',
+  '©day': 'dateTaken',
+  '©ART': 'owner',
+  '©aut': 'owner',
+  '©cpy': 'owner',
+  '©cmt': 'comment',
+  '©des': 'comment',
+};
+
+export interface VideoInspection {
+  findings: Finding[];
+  /** Handler types of all tracks, e.g. ["vide", "soun", "text"]. */
+  tracks: string[];
+}
+
+export function inspectMovie(moov: Uint8Array, moovBoxes: Box[], extras: string[] = []): VideoInspection {
+  const out = new FindingList();
+  const tracks: string[] = [];
+  const keyNames: string[] = [];
+
+  walk(moov, moovBoxes, (box, path) => {
+    const t = box.type;
+    if (t === 'mvhd' || t === 'tkhd' || t === 'mdhd') {
+      const secs = readTimes(moov, box);
+      if (secs > QT_EPOCH) out.add('dateTaken', new Date((secs - QT_EPOCH) * 1000));
+    } else if (t === 'hdlr' && path.endsWith('mdia/hdlr')) {
+      const p = payload(moov, box);
+      if (p.length >= 12) tracks.push(ascii(p, 8, 4));
+    } else if (t === '©xyz') {
+      const s = qtString(moov, box) ?? dataBoxValue(moov, box);
+      const g = s ? parseIso6709(s) : undefined;
+      out.add('videoLocation', s, g);
+    } else if (t === 'loci') {
+      out.add('videoLocation');
+    } else if (t === 'keys') {
+      keyNames.length = 0;
+      const p = payload(moov, box);
+      const count = u32be(p, 4);
+      let o = 8;
+      for (let i = 0; i < count && o + 8 <= p.length; i++) {
+        const size = u32be(p, o);
+        if (size < 8 || o + size > p.length) break;
+        keyNames.push(utf8(p.subarray(o + 8, o + size)));
+        o += size;
+      }
+    } else if (path.endsWith('ilst/' + t) && keyNames.length && /^[\x00-\x01]/.test(t)) {
+      const index = u32be(moov, box.start + 4) - 1;
+      const name = keyNames[index] ?? '';
+      const value = dataBoxValue(moov, box);
+      for (const [re, id] of KEY_FINDINGS) {
+        if (re.test(name)) {
+          out.add(id, value, id === 'videoLocation' && value ? parseIso6709(value) : undefined);
+          break;
+        }
+      }
+      if (!KEY_FINDINGS.some(([re]) => re.test(name))) out.add('otherMetadata', name);
+    } else if (UDTA_FINDINGS[t]) {
+      out.add(UDTA_FINDINGS[t]!, qtString(moov, box) ?? dataBoxValue(moov, box));
+    } else if (t === 'XMP_' || t === 'uuid') {
+      out.add('xmp');
+    } else if (path.startsWith('moov/udta/') && path.split('/').length === 3 && !['meta', 'free', 'skip'].includes(t)) {
+      out.add('otherMetadata', t);
+    }
+  });
+
+  const extraTracks = tracks.filter((h) => h !== 'vide' && h !== 'soun');
+  if (extraTracks.length) out.add('extraTracks', extraTracks.join(', '));
+  for (const e of extras) {
+    if (e === 'uuid' || e === 'XMP_') out.add('xmp');
+    else out.add('otherMetadata', e);
+  }
+  return { findings: out.items, tracks };
+}
+
+export async function inspectVideo(src: ByteSource): Promise<VideoInspection & { partial: boolean }> {
+  try {
+    const { moov, moovBoxes, extras } = await loadMovieHeader(src);
+    return { ...inspectMovie(moov, moovBoxes, extras), partial: false };
+  } catch {
+    return { findings: [], tracks: [], partial: true };
+  }
+}
+
+/**
+ * Sets creation and modification times in mvhd, tkhd and mdhd to zero, in place.
+ * Used on our own output, whose writer stamps the time of cleaning into the file.
+ */
+export function zeroMovieTimes(file: Uint8Array): number {
+  let patched = 0;
+  const top = readBoxes(file, 0, file.length);
+  for (const t of top) {
+    if (t.type !== 'moov') continue;
+    walk(file, [t], (box) => {
+      if (box.type !== 'mvhd' && box.type !== 'tkhd' && box.type !== 'mdhd') return;
+      const p = box.start + box.headerSize;
+      const width = file[p] === 1 ? 8 : 4;
+      file.fill(0, p + 4, p + 4 + 2 * width);
+      patched++;
+    });
+  }
+  return patched;
+}
+
+/** More samples than this in one track is not a real phone or camera video. */
+const MAX_SAMPLES = 20_000_000;
+
+function countEntries(b: Uint8Array, box: Box, entrySize: number, headerBytes = 8): number {
+  const p = payload(b, box);
+  if (p.length < headerBytes) throw new FormatError(`short ${box.type}`);
+  const n = u32be(p, headerBytes - 4);
+  if (headerBytes + n * entrySize > p.length) throw new FormatError(`${box.type} entries past its end`);
+  return n;
+}
+
+/**
+ * Checks that every track's sample tables are consistent with each other. Damaged tables (for example a
+ * "samples per chunk" of a billion) can make video libraries loop for minutes and freeze the page,
+ * so such files are refused up front as damaged.
+ */
+export function sampleTableProblems(moov: Uint8Array, moovBoxes: Box[]): string[] {
+  const problems: string[] = [];
+  walk(moov, moovBoxes, (box, path) => {
+    if (box.type !== 'stbl') return;
+    try {
+      const kids = children(moov, box);
+      const get = (t: string) => kids.find((k) => k.type === t);
+      const stsz = get('stsz');
+      const stco = get('stco') ?? get('co64');
+      if (!stsz || !stco) return; // fragmented files keep their tables elsewhere
+      const sp = payload(moov, stsz);
+      if (sp.length < 12) throw new FormatError('short stsz');
+      const fixedSize = u32be(sp, 4);
+      const samples = u32be(sp, 8);
+      if (samples > MAX_SAMPLES) throw new FormatError('too many samples');
+      if (fixedSize === 0 && 12 + samples * 4 > sp.length) throw new FormatError('stsz entries past its end');
+      const chunks = countEntries(moov, stco, stco.type === 'co64' ? 8 : 4);
+      const stsc = get('stsc');
+      if (stsc) {
+        const n = countEntries(moov, stsc, 12);
+        const p = payload(moov, stsc);
+        let prevFirst = 0;
+        for (let i = 0; i < n; i++) {
+          const first = u32be(p, 8 + i * 12);
+          const perChunk = u32be(p, 12 + i * 12);
+          if (first < 1 || first <= prevFirst || first > chunks) throw new FormatError('stsc chunk index out of order');
+          if (perChunk < 1 || perChunk > samples) throw new FormatError('stsc samples per chunk out of range');
+          prevFirst = first;
+        }
+      }
+      const stts = get('stts');
+      if (stts) {
+        const n = countEntries(moov, stts, 8);
+        const p = payload(moov, stts);
+        let total = 0;
+        for (let i = 0; i < n; i++) total += u32be(p, 8 + i * 8);
+        if (total > samples + 1) throw new FormatError('stts counts more samples than stsz');
+      }
+      const ctts = get('ctts');
+      if (ctts) {
+        const n = countEntries(moov, ctts, 8);
+        const p = payload(moov, ctts);
+        let total = 0;
+        for (let i = 0; i < n; i++) total += u32be(p, 8 + i * 8);
+        if (total > samples + 1) throw new FormatError('ctts counts more samples than stsz');
+      }
+      const stss = get('stss');
+      if (stss) countEntries(moov, stss, 4);
+    } catch (e) {
+      problems.push(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  });
+  return problems;
+}
+
+/** Refuses MP4/MOV files whose structure is damaged in ways that could freeze the page. Other formats pass. */
+export async function assertSaneMovie(src: ByteSource): Promise<void> {
+  const head = await src.read(0, 12);
+  if (head.length < 8 || ascii(head, 4, 4) !== 'ftyp') return; // not MP4/MOV: left to the video library
+  const { moov, moovBoxes } = await loadMovieHeader(src);
+  const problems = sampleTableProblems(moov, moovBoxes);
+  if (problems.length) throw new FormatError(`damaged video: ${problems[0]}`);
+}
