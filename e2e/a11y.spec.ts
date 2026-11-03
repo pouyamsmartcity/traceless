@@ -35,8 +35,10 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
       for (const n of [0, 1]) await expect(page.getByTestId('item').nth(n).getByTestId('item-status')).toHaveAttribute('class', /ready/, { timeout: 90_000 });
       await page.getByTestId('item').nth(1).getByTestId('more-actions').click();
       problems.push(...(await audit(page, 'cards')));
-      await page.getByRole('button', { name: 'English' }).click();
+      await page.getByTestId('lang').selectOption('en');
       problems.push(...(await audit(page, 'english')));
+      await page.getByTestId('lang').selectOption('tr');
+      problems.push(...(await audit(page, 'turkish')));
       expect(problems).toEqual([]);
     });
   }

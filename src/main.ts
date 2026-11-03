@@ -2,15 +2,17 @@ import 'vazirmatn/Vazirmatn-Variable-font-face.css';
 import './ui/styles.css';
 import { App } from './ui/app';
 
-const SHARE_CACHE = 'pakkon-shared';
+const SHARE_CACHE = 'traceless-shared';
 
-const base = new URL(import.meta.env.BASE_URL, location.href).href;
+// The app's root folder. The built script sits in assets/, one level below it, whichever language page (/, /fa/,
+// /tr/) loaded it; during development the page is always the root.
+const base = import.meta.env.PROD ? new URL(/* @vite-ignore */ '../', import.meta.url).href : new URL(import.meta.env.BASE_URL, location.href).href;
 const root = document.getElementById('app')!;
 const app = new App(root, base);
 app.start();
 
 /**
- * Picks up files sent to Pakkon from another app's share sheet (Android, installed app).
+ * Picks up files sent to Traceless from another app's share sheet (Android, installed app).
  * The offline worker holds them in memory and hands them over by message; they are never stored.
  */
 async function takeSharedFiles(): Promise<void> {
@@ -55,7 +57,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     if (hadController) app.showUpdateReady();
   });
   navigator.serviceWorker
-    .register('./sw.js', { scope: './' })
+    .register(new URL('sw.js', base), { scope: base })
     .then((reg) => {
       // If storing the offline copy fails (connection lost), the page loads the models itself right away.
       const installing = reg.installing;

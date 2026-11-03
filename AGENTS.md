@@ -1,6 +1,6 @@
-# Pakkon: notes for AI agents and developers
+# Traceless: notes for AI agents and developers
 
-Pakkon makes photos, videos and voice notes safe to share: it removes hidden location, device and time data,
+Traceless makes photos, videos and voice notes safe to share: it removes hidden location, device and time data,
 covers faces, licence plates, text and people, and can change voices. Its users include journalists and activists
 whose safety can depend on a file. Read this before changing anything.
 
@@ -28,7 +28,7 @@ whose safety can depend on a file. Read this before changing anything.
 | `npm run build` | type check and production build into `dist/` |
 | `npm test` | unit tests (Vitest, Node) |
 | `npm run test:e2e` | browser tests (Playwright, Chromium; builds and serves `dist/`) |
-| `npm run build:cli` / `npm run test:cli` | command-line tool and MCP server into `dist-cli/pakkon.mjs`, and its smoke test |
+| `npm run build:cli` / `npm run test:cli` | command-line tool and MCP server into `dist-cli/traceless.mjs`, and its smoke test |
 | `npm run fixtures` | regenerate the leaky test files (needs ffmpeg and ExifTool) |
 
 Before you push: `npm run typecheck && npm test && npm run test:cli`, and the browser tests for anything in

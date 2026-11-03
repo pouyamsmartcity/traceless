@@ -33,11 +33,11 @@ async function toneHz(page: Page, href: string | null): Promise<number> {
   }, href);
 }
 
-test.describe('Pakkon: new features', () => {
+test.describe('Traceless: new features', () => {
   test.beforeEach(async ({ page }) => {
     // The welcome card is tested on its own; other tests start as a returning visitor.
     await page.addInitScript(() => {
-      if (!sessionStorage.getItem('fresh')) localStorage.setItem('pakkon-intro', 'done');
+      if (!sessionStorage.getItem('fresh')) localStorage.setItem('traceless-intro', 'done');
     });
   });
 
@@ -512,7 +512,7 @@ test.describe('Pakkon: new features', () => {
   test('first visit: a short welcome that stays closed once dismissed', async ({ page }) => {
     await page.addInitScript(() => sessionStorage.setItem('fresh', '1'));
     await page.goto('/');
-    await page.evaluate(() => localStorage.removeItem('pakkon-intro'));
+    await page.evaluate(() => localStorage.removeItem('traceless-intro'));
     await page.reload();
     await expect(page.getByTestId('intro')).toBeVisible();
     await page.getByTestId('intro-done').click();

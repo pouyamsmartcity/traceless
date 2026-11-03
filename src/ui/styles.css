@@ -1,4 +1,4 @@
-/* Pakkon: calm, trustworthy, modern. Light and dark looks share one set of tokens. */
+/* Traceless: calm, trustworthy, modern. Light and dark looks share one set of tokens. */
 :root {
   --bg: #f3f6f4;
   --bg-2: #e7efeb;
@@ -199,6 +199,31 @@ select {
 .icon-btn.text {
   font-size: 0.85rem;
   font-weight: 700;
+}
+
+.lang-picker {
+  position: relative;
+  display: inline-flex;
+  gap: 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* The real select covers the whole button: native, accessible and easy to tap on phones. */
+.lang-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px; /* no zoom on focus in iOS Safari */
+}
+
+.lang-picker:has(.lang-select:focus-visible) {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .icon-btn.danger {
@@ -1376,7 +1401,7 @@ input.masked {
 }
 
 @media (max-width: 480px) {
-  /* Narrow phones: the hero says what Pakkon does; the header keeps just the name. */
+  /* Narrow phones: the hero says what Traceless does; the header keeps just the name. */
   .brand p {
     display: none;
   }
@@ -1622,4 +1647,33 @@ input.masked {
   font-size: 0.9rem;
   font-weight: 700;
   animation: rise 0.3s var(--ease) both;
+}
+
+/* ---------- The readable page before the app starts (and without JavaScript) ---------- */
+
+.about {
+  margin-top: 18px;
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.about h2 {
+  margin: 18px 0 6px;
+  font-size: 1.1rem;
+}
+
+.about ul {
+  margin: 0;
+  padding-inline-start: 20px;
+}
+
+.about dt {
+  margin-top: 10px;
+  font-weight: 700;
+}
+
+.about dd {
+  margin: 2px 0 0;
+  color: var(--muted);
 }

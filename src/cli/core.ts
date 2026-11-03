@@ -10,7 +10,7 @@ import { STRINGS } from '../ui/i18n';
 import { decodePixels, encodeClean, orient, paintSolid, type NodeCover } from './image-node';
 
 /**
- * Pakkon without a browser: the functions behind the command-line tool and the agent (MCP) tools.
+ * Traceless without a browser: the functions behind the command-line tool and the agent (MCP) tools.
  * Everything runs locally; nothing is sent anywhere.
  */
 
@@ -151,20 +151,20 @@ export async function clean(bytes: Uint8Array, opts: CleanOptions = {}): Promise
     return { kind: 'image', bytes: out, ext: type === 'image/png' ? 'png' : 'jpg', mime: type, removed: report.leaks, notes };
   }
   if (report.kind === 'video') {
-    if (opts.covers?.length) throw new Error('covering in videos needs the Pakkon app (it re-encodes the picture)');
+    if (opts.covers?.length) throw new Error('covering in videos needs the Traceless app (it re-encodes the picture)');
     const r = await cleanVideo(new Blob([bytes as BlobPart]));
     notes.push('The video was rebuilt with only its picture and sound; picture and sound themselves were not changed.');
     if (r.droppedTracks) notes.push(`${r.droppedTracks} extra track(s) (such as GPS tracks or subtitles) were left out.`);
-    notes.push('Faces and plates were NOT covered: use the Pakkon app for that.');
+    notes.push('Faces and plates were NOT covered: use the Traceless app for that.');
     return { kind: 'video', bytes: r.bytes, ext: 'mp4', mime: 'video/mp4', removed: report.leaks, notes };
   }
   if (report.kind === 'audio') {
     const r = await cleanAudio(new Blob([bytes as BlobPart]));
-    notes.push('The sound was put into a new M4A file with no tags. The voice was NOT changed: use the Pakkon app for that.');
+    notes.push('The sound was put into a new M4A file with no tags. The voice was NOT changed: use the Traceless app for that.');
     if (r.droppedPicture) notes.push('The file also had a picture; only the sound was kept.');
     return { kind: 'audio', bytes: r.bytes, ext: 'm4a', mime: 'audio/mp4', removed: report.leaks, notes };
   }
-  throw new Error('not a photo, video or recording Pakkon can read');
+  throw new Error('not a photo, video or recording Traceless can read');
 }
 
 /** Independent check of a file: does it still reveal anything? (Use it on files cleaned by any tool.) */
@@ -176,6 +176,6 @@ export async function check(bytes: Uint8Array): Promise<{ kind: MediaKind; clean
     problems = kind === 'jpeg' || kind === 'png' ? await imageLeftovers(bytes, kind === 'png' ? 'image/png' : 'image/jpeg') : report.leaks.map((l) => l.id);
   } else if (report.kind === 'video') problems = await videoLeftovers(bytes);
   else if (report.kind === 'audio') problems = await audioLeftovers(bytes);
-  else problems = ['not a photo, video or recording Pakkon can read'];
+  else problems = ['not a photo, video or recording Traceless can read'];
   return { kind: report.kind, clean: problems.length === 0 && report.leaks.length === 0, problems, leaks: report.leaks };
 }

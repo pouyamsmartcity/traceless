@@ -3,16 +3,16 @@ import { dirname, extname, join, resolve } from 'node:path';
 import { check, clean, inspect } from './core';
 import { readInput, serve, SERVER_INFO } from './mcp';
 
-const HELP = `Pakkon ${SERVER_INFO.version} — make photos, videos and voice notes safe to share (runs offline)
+const HELP = `Traceless ${SERVER_INFO.version} — make photos, videos and voice notes safe to share (runs offline)
 
 Usage:
-  pakkon inspect <file> [--json]            What the file reveals (location, device, time...)
-  pakkon clean <file> [-o <out>] [--cover x,y,w,h[,ellipse]]... [--color #rrggbb] [--json]
+  traceless inspect <file> [--json]            What the file reveals (location, device, time...)
+  traceless clean <file> [-o <out>] [--cover x,y,w,h[,ellipse]]... [--color #rrggbb] [--json]
                                             Write a safe copy (never changes the original)
-  pakkon check <file> [--json]              Does the file still reveal anything? (exit code 1 if so)
-  pakkon mcp                                Run as an MCP server for AI agents (stdio)
+  traceless check <file> [--json]              Does the file still reveal anything? (exit code 1 if so)
+  traceless mcp                                Run as an MCP server for AI agents (stdio)
 
-Photos: JPEG and PNG are redrawn from their pixels (other formats: use the Pakkon app).
+Photos: JPEG and PNG are redrawn from their pixels (other formats: use the Traceless app).
 Videos: rebuilt with only picture and sound (to cover faces in videos, use the app).
 Voice notes: a fresh M4A without tags (to change the voice, use the app).
 `;
@@ -25,7 +25,7 @@ function arg(args: string[], name: string): string | undefined {
 function randomName(ext: string): string {
   const a = new Uint8Array(6);
   crypto.getRandomValues(a);
-  return `pakkon-${Array.from(a, (b) => (b % 36).toString(36)).join('')}.${ext}`;
+  return `traceless-${Array.from(a, (b) => (b % 36).toString(36)).join('')}.${ext}`;
 }
 
 export async function main(argv: string[]): Promise<number> {

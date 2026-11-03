@@ -63,7 +63,7 @@ function decodeKnown(bytes: Uint8Array, kind: ReturnType<typeof sniffImage>): { 
     const png = PNG.sync.read(Buffer.from(stripPng(bytes)));
     return { pixels: { width: png.width, height: png.height, data: new Uint8Array(png.data.buffer, png.data.byteOffset, png.data.length) }, type: 'image/png' };
   }
-  throw new NodeImageError('unsupported', `${kind} pictures are only supported in the Pakkon app (browser)`);
+  throw new NodeImageError('unsupported', `${kind} pictures are only supported in the Traceless app (browser)`);
 }
 
 

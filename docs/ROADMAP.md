@@ -4,10 +4,10 @@ Done since this list was written: voice change in videos (1), text covering in v
 (5, first version), camera mode (10), edit hints for received photos (13/14, first version), crowd count (17, as a
 lower bound from faces), sealed original (12).
 
-Twenty ideas, grouped by how well they fit Pakkon's purpose: protecting the people in and behind a photo or video.
+Twenty ideas, grouped by how well they fit Traceless's purpose: protecting the people in and behind a photo or video.
 Each needs the same treatment as v0.1: tests with real and hostile files, and honest limits in the interface.
 
-## A. Stronger protection (fits Pakkon directly)
+## A. Stronger protection (fits Traceless directly)
 
 1. **Voice disguise in videos.** Pitch and formant shift that keeps speech understandable, as an alternative to
    removing the sound. Must be tested against simple reversal (a fixed pitch shift can be undone).
@@ -18,10 +18,10 @@ Each needs the same treatment as v0.1: tests with real and hostile files, and ho
 5. **Location risk score.** Combine what was found (signs, plates, skyline, shop fronts) into a plain warning:
    "this photo may show where it was taken".
 6. **Shadow and sky warning.** Explain when long, sharp shadows could reveal the time of day and direction.
-7. **iPhone "share to Pakkon".** iOS has no web share target; an Apple Shortcut could pass photos to the app.
+7. **iPhone "share to Traceless".** iOS has no web share target; an Apple Shortcut could pass photos to the app.
 8. **Android app package.** A small wrapper (Trusted Web Activity) for people who cannot reach the website.
 9. **Offline sharing during shutdowns.** A single file or package that can be passed by Bluetooth or USB.
-10. **Take the photo inside Pakkon.** Camera mode whose pictures never carry location or device data at all.
+10. **Take the photo inside Traceless.** Camera mode whose pictures never carry location or device data at all.
 11. **More languages of Iran.** Kurdish, Azerbaijani Turkish, Baluchi and Arabic, reviewed by native speakers.
 12. **Sealed original.** Keep the untouched original encrypted on the device with a hash and time stamp, so an
     authentic version can be proven later without ever sharing it.
@@ -51,7 +51,7 @@ Each needs the same treatment as v0.1: tests with real and hostile files, and ho
 
 - **Identifying or searching for a specific person** in crowds or long videos (face recognition, re-identification,
   tracking people across cameras). This is the core of surveillance and would be used first against the people
-  Pakkon is meant to protect.
+  Traceless is meant to protect.
 - **AI "enhancement" of blurry plates or faces.** It invents detail that is not in the picture and can point at an
   innocent person.
 - **Reading plates in other people's footage** or matching them against databases.

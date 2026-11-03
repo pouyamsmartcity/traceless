@@ -95,7 +95,7 @@ export interface Options {
   text: boolean;
   /** Cover whole people (body, clothes, hair). */
   people: boolean;
-  /** How covers look: smart colour, black or Pakkon's mark. */
+  /** How covers look: smart colour, black or Traceless's mark. */
   maskStyle: MaskStyle;
   /** Leave the sound out of videos. */
   mute: boolean;

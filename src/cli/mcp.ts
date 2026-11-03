@@ -6,12 +6,12 @@ import { check, clean, inspect } from './core';
 
 /**
  * A Model Context Protocol (MCP) server over standard input/output, without any dependency: it lets AI agents
- * (Claude, Cursor and other MCP clients) use Pakkon's tools on files of this computer. It never opens a network
+ * (Claude, Cursor and other MCP clients) use Traceless's tools on files of this computer. It never opens a network
  * connection. JSON-RPC 2.0, one message per line.
  */
 
 export const PROTOCOL_VERSION = '2025-06-18';
-export const SERVER_INFO = { name: 'pakkon', title: 'Pakkon', version: '0.1.0' };
+export const SERVER_INFO = { name: 'traceless', title: 'Traceless', version: '0.1.0' };
 
 const coverSchema = {
   type: 'object',
@@ -38,7 +38,7 @@ export const TOOLS = [
     name: 'clean_file',
     title: 'Make a safe copy',
     description:
-      'Writes a safe copy next to the original (never changes the original): photos (JPEG, PNG) are redrawn from their pixels, with optional solid covers over areas you give (e.g. faces you see); videos keep only picture and sound; voice notes become a fresh M4A without tags. The copy is checked again before it is written. Faces in videos and voice changes need the Pakkon app.',
+      'Writes a safe copy next to the original (never changes the original): photos (JPEG, PNG) are redrawn from their pixels, with optional solid covers over areas you give (e.g. faces you see); videos keep only picture and sound; voice notes become a fresh M4A without tags. The copy is checked again before it is written. Faces in videos and voice changes need the Traceless app.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -79,7 +79,7 @@ export async function readInput(path: string): Promise<Uint8Array> {
 function randomName(ext: string): string {
   const a = new Uint8Array(6);
   crypto.getRandomValues(a);
-  return `pakkon-${Array.from(a, (b) => (b % 36).toString(36)).join('')}.${ext}`;
+  return `traceless-${Array.from(a, (b) => (b % 36).toString(36)).join('')}.${ext}`;
 }
 
 /** Runs one tool; returns MCP content (text plus the same data as structured JSON). */
@@ -139,7 +139,7 @@ export async function handle(raw: unknown): Promise<Json | undefined> {
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER_INFO,
         instructions:
-          'Pakkon makes photos, videos and voice notes safe to share, locally. Use inspect_file to see what a file reveals, clean_file to write a safe copy (give covers for faces or other areas you see in a photo), and check_file to verify a file. Never claim a file is 100% safe: things visible in the picture (signs, reflections, tattoos) and voices are not removed unless covered.',
+          'Traceless makes photos, videos and voice notes safe to share, locally. Use inspect_file to see what a file reveals, clean_file to write a safe copy (give covers for faces or other areas you see in a photo), and check_file to verify a file. Never claim a file is 100% safe: things visible in the picture (signs, reflections, tattoos) and voices are not removed unless covered.',
       });
     case 'ping':
       return reply({});
@@ -184,5 +184,5 @@ export function serve(): void {
     if (isTool) tools = tools.then(run);
     else void run();
   });
-  process.stderr.write('pakkon MCP server ready (stdio, offline)\n');
+  process.stderr.write('traceless MCP server ready (stdio, offline)\n');
 }

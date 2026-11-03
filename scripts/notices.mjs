@@ -39,7 +39,7 @@ function licenseText(pkg) {
 
 export function writeNotices(outDir, packages, extra = '') {
   const parts = [
-    'Pakkon is free software under the MIT licence (see LICENSE).',
+    'Traceless is free software under the MIT licence (see LICENSE).',
     'It includes the following third-party software, under their own licences.',
     '',
   ];

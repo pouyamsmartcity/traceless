@@ -11,6 +11,8 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:4173/',
     trace: 'retain-on-failure',
+    // Most tests read the Persian interface (the app picks the browser's language when none is saved).
+    locale: 'fa-IR',
   },
   projects: [
     { name: 'phone', use: { ...devices['Pixel 7'] } },

@@ -5,7 +5,7 @@ main(process.argv.slice(2)).then(
     if (code >= 0) process.exitCode = code;
   },
   (e: unknown) => {
-    process.stderr.write(`pakkon: ${e instanceof Error ? e.message : String(e)}\n`);
+    process.stderr.write(`traceless: ${e instanceof Error ? e.message : String(e)}\n`);
     process.exitCode = 2;
   },
 );

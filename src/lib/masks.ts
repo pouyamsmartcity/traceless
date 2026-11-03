@@ -7,7 +7,7 @@ import type { Rect } from './detect/geometry';
  * - plates, text and hand-drawn covers: rounded rectangles,
  * - whole people: their silhouette, found by a segmentation network (a rounded box when that fails).
  * Styles: "smart" takes its colour from just around the cover so it sits naturally in the picture,
- * "black" is the classic look, "brand" is Pakkon's green with its eraser mark, "sticker" is a friendly solid pastel
+ * "black" is the classic look, "brand" is Traceless's green with its eraser mark, "sticker" is a friendly solid pastel
  * (faces get a drawn smiley on top of the solid fill).
  */
 

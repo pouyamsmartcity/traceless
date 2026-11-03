@@ -52,6 +52,7 @@ export function icon(paths: string[], size = 20): SVGSVGElement {
 }
 
 export const ICONS = {
+  globe: ['M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z', 'M2 12h20', 'M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z'],
   eraser: ['M20 20H9L4 15a2 2 0 0 1 0-3l9-9a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3l-8 8', 'M7 9l8 8'],
   share: ['M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7', 'M12 3v12', 'M7 8l5-5 5 5'],
   save: ['M12 3v12', 'M7 10l5 5 5-5', 'M5 21h14'],

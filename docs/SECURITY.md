@@ -1,11 +1,11 @@
 # Security and privacy model
 
-Pakkon is meant for people whose safety can depend on a photo not revealing where they were or who was there.
+Traceless is meant for people whose safety can depend on a photo not revealing where they were or who was there.
 This page says plainly what it protects against, how that is checked, and where its limits are.
 
-## What Pakkon protects against
+## What Traceless protects against
 
-| Risk | What Pakkon does | How it is checked |
+| Risk | What Traceless does | How it is checked |
 |---|---|---|
 | Hidden data in photos (GPS, phone model, serial number, owner, dates, time zone) | The picture is redrawn from its pixels into a new file; nothing from the original file is copied | Output stripped to picture data only (JPEG: SOI/DQT/SOF/DHT/DRI/SOS/EOI plus a fixed JFIF header; PNG: IHDR/PLTE/tRNS/IDAT/IEND), then re-read: any finding blocks delivery |
 | Hidden thumbnails, edit history (XMP), IPTC, Content Credentials (C2PA), maker notes | Same: none of it survives a redraw | Same |
@@ -16,7 +16,7 @@ This page says plainly what it protects against, how that is checked, and where 
 | People identifiable by body, clothes or hair (faces turned away) | Optional covering of whole people (person detection, silhouettes; in videos the outline of two neighbouring samples is joined and grown so moving arms and legs stay covered) | Browser tests on a photo and a video; on 20 WIDER FACE crowd photos, one full-frame pass found the person around 99% of faces of 40 px or more and 81% of faces of 20–40 px. Small, blurry people in heavily compressed video can still be missed |
 | Moving faces in videos | Frames sampled three times a second; each face is tracked and gets one cover that follows it, with a margin for hand shake (in frame pixels), for irregular motion (turning, stopping) and for time unseen; a face missed in up to two samples in a row keeps its cover; faces at the picture's edge keep a whole oval | Tested on panning videos, a rotated video and a late-starting MPEG-TS file; unit tests with walking bob, shake at the sampling rate, a person turning around, motion blur, faces at the edge and repeated frame times check that every point of the face stays under its cover's real shape |
 | Voice notes and recordings (place-named titles, speaker, date, app, location, cover picture) | The sound is decoded and encoded again into a new M4A with one sound track and no tags; optional voice change | Browser tests with OGG/Opus, MP3 and M4A voice notes full of tags check that none of the values is left in the bytes, and that the tone is unchanged (or lower with the voice change) |
-| A phone taken while files are open | "Wipe" forgets every original and copy at once (memory released); optional auto-forget after five minutes in the background. Nothing is ever stored on the device by Pakkon | Browser tests, including a simulated five minutes in the background |
+| A phone taken while files are open | "Wipe" forgets every original and copy at once (memory released); optional auto-forget after five minutes in the background. Nothing is ever stored on the device by Traceless | Browser tests, including a simulated five minutes in the background |
 | Revealing moments at the start or end of a video, revealing edges of a photo | Cut the video to a part (always re-encoded: copying would keep frames from the last key frame before the cut) or crop the photo; covers follow | Browser tests check the new length and that a moving face stays covered after the cut; a cropped photo keeps its face cover in the new position |
 | Voices in videos | Optional voice change (pitch and formants lowered by a random, drifting factor; stops casual listeners, can be partly undone by someone who tries) or sound removal (the safe choice) | Pitch measured in the output in a browser test; if the browser cannot encode audio, the user chooses instead of a silent fallback |
 | Needing to prove later which original a shared copy came from | Optional sealed original: the untouched file, encrypted with a passphrase (normalised for Persian/Arabic keyboards; PBKDF2-SHA-256, 600,000 rounds; AES-256-GCM). A keyed "seal code" (HMAC with a secret inside the sealed file) can be noted or published without linking anyone's copy of the original to it. It proves the file is unchanged since sealing, not that it was never edited before; the seal time is the device clock. The passphrase field is not offered to password managers; the app never stores the original | Unit and browser tests: round trip, wrong passphrase, changed file, nothing readable in the sealed file |
@@ -32,18 +32,18 @@ This page says plainly what it protects against, how that is checked, and where 
   that no request leaves the site.
 - No accounts, analytics, ads, fonts or scripts from other sites. Models and the WebAssembly runtime are part of the
   app and stored for offline use.
-- Pakkon keeps no copies. Settings (language and switches) are the only thing stored, in the browser's local storage.
-- Files shared into Pakkon from another app (Android) are handed over in memory by the offline worker and never
+- Traceless keeps no copies. Settings (language and switches) are the only thing stored, in the browser's local storage.
+- Files shared into Traceless from another app (Android) are handed over in memory by the offline worker and never
   written to storage.
 
 ### Residual risk: the share target
 
-On Android, "share to Pakkon" sends the file to the app's own address. The offline worker catches it on the
+On Android, "share to Traceless" sends the file to the app's own address. The offline worker catches it on the
 device. If the offline worker is missing (for example after site data was cleared while the installed app was
-kept), that request would reach the web server hosting Pakkon. Hosting should therefore be static, with request
-logging off where possible. Opening Pakkon and choosing files inside it never has this risk.
+kept), that request would reach the web server hosting Traceless. Hosting should therefore be static, with request
+logging off where possible. Opening Traceless and choosing files inside it never has this risk.
 
-## What Pakkon cannot do
+## What Traceless cannot do
 
 - It cannot hide what is visible: signs it did not find, landmarks, shadows, reflections, clothes, tattoos, voices.
 - Detection is not perfect. The app always asks the user to check the picture and the whole video.
